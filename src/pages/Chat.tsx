@@ -5,10 +5,11 @@ import { useCall } from '@/src/contexts/CallContext';
 import { supabase } from '@/src/lib/supabase';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
-import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical } from 'lucide-react';
+import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical, Smile, FileText, StopCircle } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
 
 const formatChatTime = (dateString: string) => {
   if (!dateString) return '';
@@ -60,13 +61,20 @@ export default function Chat() {
   const [searchQuery, setSearchQuery] = useState('');
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
 
-  // Modals
+  // Modals & Pickers
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [showNewChat, setShowNewChat] = useState(false);
   const [searchPhone, setSearchPhone] = useState<string | undefined>('');
   const [searchError, setSearchError] = useState('');
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Audio Recording States
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Stable Refs for Realtime Listeners
   const usersRef = useRef<any[]>([]);
@@ -131,6 +139,17 @@ export default function Chat() {
     }
   }, [incomingCall, currentCall]);
 
+  // Audio Recording Timer
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isRecording) {
+      interval = setInterval(() => setRecordingTime((prev) => prev + 1), 1000);
+    } else {
+      setRecordingTime(0);
+    }
+    return () => clearInterval(interval);
+  }, [isRecording]);
+
   // Apply Theme
   useEffect(() => {
     const root = document.documentElement;
@@ -173,7 +192,7 @@ export default function Chat() {
        if (privacyOnline !== 'everyone') return; 
        await supabase.from('users').update({ 
          is_online: status,
-         last_seen: new Date().toISOString() // Save last seen strictly!
+         last_seen: new Date().toISOString() 
        }).eq('id', user.id);
     };
     setOnlineStatus(true);
@@ -233,12 +252,11 @@ export default function Chat() {
             supabase.from('messages').update({ status: document.visibilityState === 'visible' ? 'read' : 'delivered' }).eq('id', newMsg.id).then();
           }
         } else if (newMsg.sender_id !== user?.id) {
-          // BACKGROUND NOTIFICATION & SOUND LOGIC
           playReceiveSound();
           if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
              const senderUser = usersRef.current.find(u => u.id === newMsg.sender_id);
              new Notification(senderUser?.name || "MedLine", { 
-               body: newMsg.type === 'text' ? newMsg.content : 'Sent an attachment',
+               body: newMsg.type === 'text' ? newMsg.content : (newMsg.type === 'audio' ? '🎤 Voice message' : '📎 Attachment'),
                icon: senderUser?.avatar_url || undefined
              });
           }
@@ -287,7 +305,6 @@ export default function Chat() {
     };
   }, [user?.id, soundsEnabled]); 
 
-  // Read Receipts Observer
   const observer = useRef<IntersectionObserver | null>(null);
   useEffect(() => {
     observer.current = new IntersectionObserver((entries) => {
@@ -372,6 +389,7 @@ export default function Chat() {
     const conversationId = `conv_${[user?.id, otherUser.id].sort().join('_')}`;
     setActiveConversation({ id: conversationId, user: otherUser });
     setReplyingTo(null);
+    setShowEmojiPicker(false);
     setChatMeta(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], unreadCount: 0 } }));
     setManualUnread(prev => prev.filter(id => id !== conversationId)); 
     fetchMessages(conversationId);
@@ -380,6 +398,7 @@ export default function Chat() {
   const startGroupConversation = async (group: any) => {
     setActiveConversation({ id: group.id, isGroup: true, name: group.name, participants: group.participants });
     setReplyingTo(null);
+    setShowEmojiPicker(false);
     setChatMeta(prev => ({ ...prev, [group.id]: { ...prev[group.id], unreadCount: 0 } }));
     setManualUnread(prev => prev.filter(id => id !== group.id));
     fetchMessages(group.id);
@@ -429,8 +448,9 @@ export default function Chat() {
     }, 2000);
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // SEND MESSAGE
+  const sendMessage = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!newMessage.trim() || !activeConversation || !user) return;
 
     let msgContent = newMessage;
@@ -440,6 +460,8 @@ export default function Chat() {
       msgType = 'reply';
       let originalText = replyingTo.content;
       if (replyingTo.type === 'image') originalText = '📷 Photo';
+      if (replyingTo.type === 'audio') originalText = '🎤 Voice message';
+      if (replyingTo.type === 'document') originalText = '📄 Document';
       if (replyingTo.type === 'call') originalText = '📞 Call';
       const senderInfo = users.find(u => u.id === replyingTo.sender_id);
       msgContent = JSON.stringify({
@@ -462,9 +484,10 @@ export default function Chat() {
     };
 
     setNewMessage('');
+    setShowEmojiPicker(false);
     setReplyingTo(null);
     setMessages(prev => [...prev, newMsgObj]);
-    playSendSound(); // PLAY SEND SOUND
+    playSendSound(); 
     
     setChatMeta(prev => ({
       ...prev,
@@ -490,31 +513,94 @@ export default function Chat() {
       timestamp: newMsgObj.timestamp
     }]);
 
-    if (error) {
-      alert(`Failed to send message!\nError: ${error.message}`);
-      console.error("Supabase Insert Error:", error);
+    if (error) alert(`Failed to send message!\nError: ${error.message}`);
+  };
+
+  // AUDIO RECORDING LOGIC
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const fileName = `${user?.id}-audio-${Date.now()}.webm`;
+        
+        try {
+          const { error: uploadError } = await supabase.storage.from('chat-media').upload(fileName, audioBlob);
+          if (uploadError) throw uploadError;
+          
+          const { data } = supabase.storage.from('chat-media').getPublicUrl(fileName);
+          
+          await supabase.from('messages').insert([{
+            conversation_id: activeConversation.id,
+            sender_id: user?.id,
+            content: data.publicUrl,
+            type: 'audio',
+            status: 'sent',
+            timestamp: new Date().toISOString()
+          }]);
+          playSendSound();
+        } catch (err: any) {
+          console.error('Error uploading audio', err);
+          alert(`Failed to send audio: ${err.message}`);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Error accessing mic:", err);
+      alert("Please allow microphone access to send voice messages.");
     }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
+      setIsRecording(false);
+    }
+  };
+
+  // GENERIC FILE UPLOAD LOGIC (Images, PDFs, etc.)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !activeConversation) return;
     const file = e.target.files[0];
     const fileExt = file.name.split('.').pop();
-    const fileName = `${user?.id}-${Math.random()}.${fileExt}`;
+    const fileName = `${user?.id}-${Date.now()}.${fileExt}`;
+    const isImage = file.type.startsWith('image/');
+    
     try {
-      await supabase.storage.from('chat-media').upload(fileName, file);
+      const { error: uploadError } = await supabase.storage.from('chat-media').upload(fileName, file);
+      if (uploadError) throw uploadError;
+
       const { data } = supabase.storage.from('chat-media').getPublicUrl(fileName);
+      
+      const msgContent = isImage ? data.publicUrl : JSON.stringify({ url: data.publicUrl, name: file.name });
+      const msgType = isImage ? 'image' : 'document';
+
       const { error } = await supabase.from('messages').insert([{
         conversation_id: activeConversation.id,
         sender_id: user?.id,
-        content: data.publicUrl,
-        type: 'image',
+        content: msgContent,
+        type: msgType,
         status: 'sent',
         timestamp: new Date().toISOString() 
       }]);
-      playSendSound(); // PLAY SEND SOUND
-      if (error) alert(`Failed to send image: ${error.message}`);
-    } catch (err) { console.error('Error uploading image', err); }
+      
+      if (!error) playSendSound();
+      else alert(`Failed to send file: ${error.message}`);
+    } catch (err: any) { 
+      console.error('Error uploading file', err); 
+      alert(`File upload failed: ${err.message}`);
+    }
   };
 
   const createGroup = async () => {
@@ -568,6 +654,8 @@ export default function Chat() {
   const renderLastMessagePreview = (msg: any) => {
     if (!msg) return '';
     if (msg.type === 'image') return '📷 Photo';
+    if (msg.type === 'audio') return '🎤 Voice message';
+    if (msg.type === 'document') return '📄 Document';
     if (msg.type === 'call') return '📞 Call';
     if (msg.type === 'reply') {
       try { return JSON.parse(msg.content).text; } catch(e) { return 'Message'; }
@@ -1135,7 +1223,7 @@ export default function Chat() {
               </div>
 
               {/* Messages Area */}
-              <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-2 z-10">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-2 z-10" onClick={() => setShowEmojiPicker(false)}>
                 {messages.map((msg, idx) => {
                   const isMe = msg.sender_id === user?.id;
                   
@@ -1144,7 +1232,7 @@ export default function Chat() {
                       <div className="flex items-start max-w-[85%] sm:max-w-[65%] relative">
                         
                         {/* Hover Reply Button */}
-                        <button onClick={() => setReplyingTo(msg)} className={`opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 p-2 text-[#8696a0] hover:text-[#54656f] dark:hover:text-[#aebac1] ${isMe ? '-left-10' : '-right-10'}`}>
+                        <button onClick={(e) => { e.stopPropagation(); setReplyingTo(msg); }} className={`opacity-0 group-hover:opacity-100 transition-opacity absolute top-0 p-2 text-[#8696a0] hover:text-[#54656f] dark:hover:text-[#aebac1] ${isMe ? '-left-10' : '-right-10'}`}>
                           <Reply className="h-4 w-4" />
                         </button>
 
@@ -1158,9 +1246,22 @@ export default function Chat() {
                             </div>
                           )}
 
-                          {/* Message Content */}
+                          {/* Render Different Message Types */}
                           <div className="flex flex-col relative min-w-[70px]">
-                             {msg.type === 'image' ? <img src={msg.content} className="max-w-[250px] rounded mb-1" /> : msg.type === 'reply' ? <span className="pb-3 pr-14 break-words">{JSON.parse(msg.content).text}</span> : <span className="pb-3 pr-14 break-words">{msg.content}</span>}
+                             {msg.type === 'image' ? (
+                               <img src={msg.content} className="max-w-[250px] rounded mb-1" />
+                             ) : msg.type === 'audio' ? (
+                               <audio controls src={msg.content} className="max-w-[200px] sm:max-w-[250px] h-10 mb-4 mt-1" />
+                             ) : msg.type === 'document' ? (
+                               <a href={JSON.parse(msg.content).url} target="_blank" rel="noreferrer" className="flex items-center space-x-3 bg-black/5 dark:bg-white/5 p-3 rounded-lg mb-4 mt-1 cursor-pointer hover:bg-black/10 dark:hover:bg-white/10 transition">
+                                  <FileText className="h-8 w-8 text-[#54656f] dark:text-[#aebac1]" />
+                                  <span className="truncate max-w-[150px] text-sm font-medium">{JSON.parse(msg.content).name}</span>
+                               </a>
+                             ) : msg.type === 'reply' ? (
+                               <span className="pb-3 pr-14 break-words">{JSON.parse(msg.content).text}</span>
+                             ) : (
+                               <span className="pb-3 pr-14 break-words">{msg.content}</span>
+                             )}
                              
                              {/* Timestamps and Ticks */}
                              <div className="absolute bottom-[-2px] right-0 flex items-center text-[10px] text-[#667781] dark:text-[#8696a0]">
@@ -1180,6 +1281,18 @@ export default function Chat() {
                 <div ref={messagesEndRef} className="h-4" />
               </div>
 
+              {/* Emoji Picker Pop-up */}
+              {showEmojiPicker && (
+                <div className="absolute bottom-[60px] left-0 z-50">
+                  <EmojiPicker 
+                     theme={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? Theme.DARK : Theme.LIGHT} 
+                     onEmojiClick={(emojiData) => setNewMessage(prev => prev + emojiData.emoji)} 
+                     width={350} 
+                     height={400} 
+                  />
+                </div>
+              )}
+
               {/* Input Area */}
               <div className="bg-[#f0f2f5] dark:bg-[#202c33] px-2 sm:px-4 py-2 sm:py-3 z-10 flex flex-col border-t border-[#d1d7db] dark:border-[#222d34] transition-colors duration-200 shrink-0">
                 {/* Replying Preview Box */}
@@ -1188,21 +1301,51 @@ export default function Chat() {
                      <div className="flex-1 bg-white dark:bg-[#2a3942] rounded-lg p-3 border-l-4 border-[#00a884] relative">
                        <button type="button" onClick={() => setReplyingTo(null)} className="absolute top-2 right-2 text-[#8696a0]"><X className="h-4 w-4" /></button>
                        <p className="text-[13px] font-semibold text-[#00a884]">{replyingTo.sender_id === user?.id ? 'You' : 'User'}</p>
-                       <p className="text-[13px] text-[#667781] dark:text-[#8696a0] truncate pr-8">{replyingTo.type === 'image' ? '📷 Photo' : replyingTo.type === 'reply' ? JSON.parse(replyingTo.content).text : replyingTo.content}</p>
+                       <p className="text-[13px] text-[#667781] dark:text-[#8696a0] truncate pr-8">
+                         {replyingTo.type === 'image' ? '📷 Photo' : replyingTo.type === 'audio' ? '🎤 Voice message' : replyingTo.type === 'document' ? '📄 Document' : replyingTo.type === 'reply' ? JSON.parse(replyingTo.content).text : replyingTo.content}
+                       </p>
                      </div>
                   </div>
                 )}
                 
-                <form onSubmit={sendMessage} className="flex items-center space-x-1 sm:space-x-3">
-                  <Button type="button" variant="ghost" size="icon" className="text-[#54656f] dark:text-[#8696a0] shrink-0"><Paperclip className="h-6 w-6" /></Button>
-                  <div className="relative shrink-0">
-                    <Button type="button" variant="ghost" size="icon" className="text-[#54656f] dark:text-[#8696a0]"><ImageIcon className="h-6 w-6" /></Button>
-                    <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 cursor-pointer opacity-0" />
-                  </div>
-                  <Input value={newMessage} onChange={handleTyping} placeholder="Type a message" className="flex-1 rounded-lg bg-white dark:bg-[#2a3942] border-none py-3 px-4 shadow-sm focus-visible:ring-0 text-[15px] text-[#111b21] dark:text-[#e9edef] placeholder:text-[#8696a0]" />
-                  <Button type="submit" variant="ghost" size="icon" className="text-[#54656f] dark:text-[#8696a0] hover:text-[#00a884] dark:hover:text-[#00a884] shrink-0">
-                    {newMessage.trim() ? <Send className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
+                <form onSubmit={sendMessage} className="flex items-center space-x-1 sm:space-x-3 relative">
+                  
+                  {/* Emoji Button */}
+                  <Button type="button" variant="ghost" size="icon" className="text-[#54656f] dark:text-[#8696a0] shrink-0" onClick={() => setShowEmojiPicker(!showEmojiPicker)}>
+                     <Smile className="h-6 w-6" />
                   </Button>
+                  
+                  {/* File Upload Button (Paperclip) */}
+                  <div className="relative shrink-0">
+                    <Button type="button" variant="ghost" size="icon" className="text-[#54656f] dark:text-[#8696a0]"><Paperclip className="h-6 w-6" /></Button>
+                    <input type="file" accept="*/*" onChange={handleFileUpload} className="absolute inset-0 cursor-pointer opacity-0 w-full h-full" title="Attach file" />
+                  </div>
+                  
+                  {/* Text Input OR Audio Recording UI */}
+                  {isRecording ? (
+                     <div className="flex-1 flex items-center justify-between bg-white dark:bg-[#2a3942] rounded-lg px-4 py-2 sm:py-3 shadow-sm border border-red-500/50">
+                        <div className="flex items-center text-red-500 animate-pulse font-medium">
+                          <Mic className="h-5 w-5 mr-2" />
+                          <span>{formatDuration(recordingTime)}</span>
+                        </div>
+                        <Button type="button" variant="ghost" size="icon" onClick={stopRecording} className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full h-8 w-8">
+                          <StopCircle className="h-6 w-6" />
+                        </Button>
+                     </div>
+                  ) : (
+                    <Input value={newMessage} onChange={handleTyping} onClick={() => setShowEmojiPicker(false)} placeholder="Type a message" className="flex-1 rounded-lg bg-white dark:bg-[#2a3942] border-none py-3 px-4 shadow-sm focus-visible:ring-0 text-[15px] text-[#111b21] dark:text-[#e9edef] placeholder:text-[#8696a0]" />
+                  )}
+
+                  {/* Send Text OR Start Audio Recording Button */}
+                  {newMessage.trim() ? (
+                    <Button type="submit" variant="ghost" size="icon" className="text-[#54656f] dark:text-[#8696a0] hover:text-[#00a884] dark:hover:text-[#00a884] shrink-0">
+                      <Send className="h-6 w-6" />
+                    </Button>
+                  ) : isRecording ? null : (
+                    <Button type="button" variant="ghost" size="icon" onClick={startRecording} className="text-[#54656f] dark:text-[#8696a0] hover:text-[#00a884] dark:hover:text-[#00a884] shrink-0">
+                      <Mic className="h-6 w-6" />
+                    </Button>
+                  )}
                 </form>
               </div>
             </>
