@@ -5,7 +5,7 @@ import { useCall } from '@/src/contexts/CallContext';
 import { supabase } from '@/src/lib/supabase';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
-import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical, Smile, FileText, StopCircle } from 'lucide-react';
+import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical, Smile, FileText, StopCircle, Wand2 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { playNotificationSound, showNotification } from '@/src/hooks/useNotifications';
 import PhoneInput from 'react-phone-number-input';
@@ -21,6 +21,16 @@ const formatChatTime = (dateString: string) => {
 };
 
 type SidebarView = 'chats' | 'calls' | 'settings' | 'profile' | 'privacy' | 'privacy-last-seen' | 'privacy-profile-photo' | 'theme' | 'notifications' | 'archived';
+
+const FILTER_OPTIONS = [
+  'none',
+  'grayscale(100%)',
+  'sepia(100%)',
+  'invert(100%)',
+  'hue-rotate(90deg)',
+  'hue-rotate(180deg)',
+  'contrast(150%) saturate(120%)'
+];
 
 export default function Chat() {
   const { user, signOut } = useAuth();
@@ -91,10 +101,11 @@ export default function Chat() {
   useEffect(() => { chatMetaRef.current = chatMeta; }, [chatMeta]);
   useEffect(() => { activeConversationRef.current = activeConversation; }, [activeConversation]);
 
+  // CALL STATES
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [showEndCallConfirm, setShowEndCallConfirm] = useState(false);
+  const [filterIndex, setFilterIndex] = useState(0); // For video filters
   
   const callDurationRef = useRef(0);
   const previousCallRef = useRef<any>(null);
@@ -108,7 +119,6 @@ export default function Chat() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Touch Swipe State
   const touchStartX = useRef<number>(0);
 
   // AUDIO & NOTIFICATION HANDLERS
@@ -130,20 +140,46 @@ export default function Chat() {
     }
   }, []);
 
+  // FIXED RINGTONE LOGIC
   useEffect(() => {
     if (incomingCall && !currentCall) {
+      // We are receiving a call
       if (!ringtoneRef.current) {
         ringtoneRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg');
         ringtoneRef.current.loop = true;
       }
-      ringtoneRef.current.play().catch(() => console.log("User must interact with page before audio can play"));
+      ringtoneRef.current.play().catch(e => console.error("Autoplay blocked. User needs to interact with page first.", e));
+    } else if (currentCall && !remoteStream && isCaller) {
+      // We are dialing out
+      if (!ringtoneRef.current) {
+        ringtoneRef.current = new Audio('https://actions.google.com/sounds/v1/communications/telephone_ring.ogg');
+        ringtoneRef.current.loop = true;
+      }
+      ringtoneRef.current.play().catch(e => console.error("Autoplay blocked.", e));
     } else {
+      // Call connected or ended, stop ringing
       if (ringtoneRef.current) {
         ringtoneRef.current.pause();
         ringtoneRef.current.currentTime = 0;
+        ringtoneRef.current = null;
       }
     }
-  }, [incomingCall, currentCall]);
+  }, [incomingCall, currentCall, remoteStream, isCaller]);
+
+  // Video streams mapping
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+    // Force remote stream connection
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      // Small timeout to ensure play() triggers after srcObject is set
+      setTimeout(() => {
+        remoteVideoRef.current?.play().catch(e => console.error("Remote video play error:", e));
+      }, 100);
+    }
+  }, [localStream, remoteStream, currentCall]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -156,6 +192,26 @@ export default function Chat() {
   }, [isRecording]);
 
   useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (currentCall && remoteStream) {
+      interval = setInterval(() => {
+        setCallDuration(prev => {
+          const newDuration = prev + 1;
+          callDurationRef.current = newDuration;
+          return newDuration;
+        });
+      }, 1000);
+    } else if (!currentCall) {
+      setCallDuration(0);
+      setIsMuted(false);
+      setIsVideoOff(false);
+      setFilterIndex(0);
+    }
+    return () => { if (interval) clearInterval(interval); };
+  }, [currentCall, remoteStream]);
+
+  // Apply Theme
+  useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       root.classList.add('dark');
@@ -165,11 +221,13 @@ export default function Chat() {
     localStorage.setItem('whatsapp_theme', theme);
   }, [theme]);
 
+  // Persist Local Arrays
   useEffect(() => { localStorage.setItem('whatsapp_archived', JSON.stringify(archivedChats)); }, [archivedChats]);
   useEffect(() => { localStorage.setItem('whatsapp_pinned', JSON.stringify(pinnedChats)); }, [pinnedChats]);
   useEffect(() => { localStorage.setItem('whatsapp_unread', JSON.stringify(manualUnread)); }, [manualUnread]);
   useEffect(() => { localStorage.setItem('whatsapp_sounds', soundsEnabled.toString()); }, [soundsEnabled]);
 
+  // Handle outside clicks for context menu
   useEffect(() => {
     const handleClick = () => {
       setContextMenu(null);
@@ -180,6 +238,7 @@ export default function Chat() {
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
+  // Initial Load & Presence
   useEffect(() => {
     if (!user) return;
     const fetchMyProfile = async () => {
@@ -215,6 +274,7 @@ export default function Chat() {
     };
   }, [user, privacyOnline]);
 
+  // Load Data & Subscribe to Realtime
   useEffect(() => {
     if (!user) return;
     
@@ -729,6 +789,10 @@ export default function Chat() {
     }
   };
 
+  const cycleFilter = () => {
+    setFilterIndex((prev) => (prev + 1) % FILTER_OPTIONS.length);
+  };
+
   // MENU HANDLERS
   const handleContextMenu = (e: React.MouseEvent, chat: any, convId: string) => {
     e.preventDefault();
@@ -812,7 +876,8 @@ export default function Chat() {
 
   // ================= RENDER =================
   return (
-    <div className="relative flex h-screen w-full bg-[#d1d7db] dark:bg-[#0a1014] overflow-hidden transition-colors duration-200">
+    // FIX 1: Mobile Height Bug (h-[100dvh] handles dynamic browser toolbars on phones!)
+    <div className="relative flex h-[100dvh] w-full bg-[#d1d7db] dark:bg-[#0a1014] overflow-hidden transition-colors duration-200">
       {/* Background Strip */}
       <div className="absolute top-0 left-0 w-full h-[127px] bg-[#00a884] dark:bg-[#202c33] z-0 hidden sm:block transition-colors duration-200"></div>
 
@@ -963,10 +1028,17 @@ export default function Chat() {
                       const convId = isGroup ? item.id : `conv_${[user?.id, item.id].sort().join('_')}`;
                       const meta = chatMeta[convId];
                       return (
-                        <div key={item.id} className="flex cursor-pointer items-center px-3 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] transition-colors duration-200" onClick={() => isGroup ? startGroupConversation(item) : startConversation(item)} onContextMenu={(e) => handleContextMenu(e, item, convId)}>
-                            <div className="h-12 w-12 shrink-0 rounded-full overflow-hidden mr-3 flex items-center justify-center bg-[#dfe5e7] dark:bg-[#54656f]">{isGroup ? <span className="text-[#00a884] font-semibold text-lg">{item.name.charAt(0).toUpperCase()}</span> : item.avatar_url ? <img src={item.avatar_url} className="h-full w-full object-cover" /> : <UserIcon className="h-8 w-8 text-[#ffffff] dark:text-[#aebac1]" strokeWidth={1.5} />}</div>
+                        <div key={item.id} className="flex cursor-pointer items-center px-3 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] transition-colors duration-200" 
+                             onClick={() => isGroup ? startGroupConversation(item) : startConversation(item)}
+                             onContextMenu={(e) => handleContextMenu(e, item, convId)}>
+                            <div className="h-12 w-12 shrink-0 rounded-full overflow-hidden mr-3 flex items-center justify-center bg-[#dfe5e7] dark:bg-[#54656f]">
+                               {isGroup ? <span className="text-[#00a884] font-semibold text-lg">{item.name.charAt(0).toUpperCase()}</span> : item.avatar_url ? <img src={item.avatar_url} className="h-full w-full object-cover" /> : <UserIcon className="h-8 w-8 text-[#ffffff] dark:text-[#aebac1]" strokeWidth={1.5} />}
+                            </div>
                             <div className="flex-1 border-b border-[#f2f2f2] dark:border-[#222d34] pb-3 pt-1 pr-2 min-w-0">
-                              <div className="flex justify-between items-center mb-1"><h3 className="text-[17px] text-[#111b21] dark:text-[#e9edef] truncate">{item.name || item.phone}</h3>{meta?.lastMessage && <span className="text-xs ml-2 text-[#667781] dark:text-[#8696a0] shrink-0">{formatChatTime(meta.lastMessage.timestamp)}</span>}</div>
+                              <div className="flex justify-between items-center mb-1">
+                                <h3 className="text-[17px] text-[#111b21] dark:text-[#e9edef] truncate">{item.name || item.phone}</h3>
+                                {meta?.lastMessage && <span className="text-xs ml-2 text-[#667781] dark:text-[#8696a0] shrink-0">{formatChatTime(meta.lastMessage.timestamp)}</span>}
+                              </div>
                               <p className="text-[14px] text-[#667781] dark:text-[#8696a0] truncate pr-4">{renderLastMessagePreview(meta?.lastMessage)}</p>
                             </div>
                         </div>
@@ -1435,7 +1507,7 @@ export default function Chat() {
            </div>
         )}
 
-        {/* CALL UI OVERLAY */}
+        {/* CALL UI OVERLAY - FIXED RINGTONE AND HANGUP */}
         {(incomingCall || currentCall) && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white">
             {incomingCall && !currentCall && (
@@ -1443,21 +1515,33 @@ export default function Chat() {
                 <div className="h-32 w-32 overflow-hidden rounded-full bg-slate-800">
                   <UserIcon className="h-full w-full p-6 text-slate-500" />
                 </div>
-                <h2 className="text-2xl font-semibold">Incoming Call...</h2>
+                <h2 className="text-2xl font-semibold animate-pulse">Incoming Call...</h2>
                 <div className="flex space-x-6">
                   <Button onClick={answerCall} className="h-16 w-16 rounded-full bg-green-500 hover:bg-green-600"><Phone className="h-8 w-8" /></Button>
                   <Button onClick={rejectCall} className="h-16 w-16 rounded-full bg-red-500 hover:bg-red-600"><Phone className="h-8 w-8 rotate-[135deg]" /></Button>
                 </div>
               </div>
             )}
+            
             {currentCall && (
-              <div className="relative h-full w-full">
+              <div className="relative h-full w-full bg-black">
                 {isVideo && (
                   <>
+                    {/* REMOTE VIDEO - Now explicitly handling stream object visually */}
                     <video ref={remoteVideoRef} autoPlay playsInline className="h-full w-full object-cover" />
-                    <video ref={localVideoRef} autoPlay playsInline muted className={`absolute bottom-8 right-8 h-48 w-32 rounded-xl object-cover shadow-2xl border-2 border-white/20 transition-opacity ${isVideoOff ? 'opacity-0' : 'opacity-100'}`} />
+                    
+                    {/* LOCAL VIDEO - WITH FILTERS */}
+                    <video 
+                      ref={localVideoRef} 
+                      autoPlay 
+                      playsInline 
+                      muted 
+                      style={{ filter: FILTER_OPTIONS[filterIndex] }}
+                      className={`absolute bottom-8 right-8 h-48 w-32 rounded-xl object-cover shadow-2xl border-2 border-white/20 transition-opacity ${isVideoOff ? 'opacity-0' : 'opacity-100'}`} 
+                    />
                   </>
                 )}
+
                 {!isVideo && (
                   <div className="flex h-full flex-col items-center justify-center space-y-8">
                     <div className="h-32 w-32 overflow-hidden rounded-full bg-slate-800"><UserIcon className="h-full w-full p-6 text-slate-500" /></div>
@@ -1465,73 +1549,35 @@ export default function Chat() {
                     <p className="text-slate-400 font-mono text-xl">{remoteStream ? formatDuration(callDuration) : 'Connecting...'}</p>
                   </div>
                 )}
-                <div className="absolute bottom-12 left-1/2 flex -translate-x-1/2 space-x-6 z-10">
-                  <Button onClick={toggleMute} className={`h-16 w-16 rounded-full transition-colors ${isMuted ? 'bg-red-500' : 'bg-slate-600'}`}>{isMuted ? <MicOff className="h-8 w-8 text-white" /> : <Mic className="h-8 w-8 text-white" />}</Button>
-                  {isVideo && <Button onClick={toggleVideo} className={`h-16 w-16 rounded-full transition-colors ${isVideoOff ? 'bg-red-500' : 'bg-slate-600'}`}>{isVideoOff ? <VideoOff className="h-8 w-8 text-white" /> : <Video className="h-8 w-8 text-white" />}</Button>}
-                  <Button onClick={() => setShowEndCallConfirm(true)} className="h-16 w-16 rounded-full bg-red-500"><Phone className="h-8 w-8 rotate-[135deg] text-white" /></Button>
+
+                <div className="absolute bottom-12 left-1/2 flex -translate-x-1/2 space-x-4 sm:space-x-6 z-10">
+                  <Button onClick={toggleMute} className={`h-16 w-16 rounded-full transition-colors ${isMuted ? 'bg-red-500' : 'bg-slate-600'}`}>
+                    {isMuted ? <MicOff className="h-8 w-8 text-white" /> : <Mic className="h-8 w-8 text-white" />}
+                  </Button>
+
+                  {isVideo && (
+                    <>
+                      <Button onClick={toggleVideo} className={`h-16 w-16 rounded-full transition-colors ${isVideoOff ? 'bg-red-500' : 'bg-slate-600'}`}>
+                        {isVideoOff ? <VideoOff className="h-8 w-8 text-white" /> : <Video className="h-8 w-8 text-white" />}
+                      </Button>
+                      
+                      {/* MAGIC FILTER BUTTON */}
+                      <Button onClick={cycleFilter} className="h-16 w-16 rounded-full bg-indigo-500 hover:bg-indigo-600">
+                        <Wand2 className="h-8 w-8 text-white" />
+                      </Button>
+                    </>
+                  )}
+
+                  {/* INSTANT RED HANGUP BUTTON */}
+                  <Button onClick={() => endCall()} className="h-16 w-16 rounded-full bg-red-500 hover:bg-red-600">
+                    <Phone className="h-8 w-8 rotate-[135deg] text-white" />
+                  </Button>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* MODALS */}
-        {showNewChat && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#111b21] p-6 shadow-xl">
-              <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] mb-4">Start New Chat</h2>
-              <form onSubmit={handleStartNewChat} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-[#667781] dark:text-[#8696a0] mb-1">User's Phone Number</label>
-                  <div className="flex w-full border border-[#d1d7db] dark:border-[#222d34] rounded-md bg-transparent px-3 py-2 focus-within:ring-2 focus-within:ring-[#00a884] transition-colors">
-                    <PhoneInput international defaultCountry="AE" placeholder="Enter phone number" value={searchPhone} onChange={(val) => setSearchPhone(val || '')} className="w-full text-sm outline-none bg-transparent text-[#111b21] dark:text-[#e9edef]" inputComponent={Input} style={{ border: 'none', boxShadow: 'none' }} />
-                  </div>
-                  {searchError && <p className="text-red-500 text-xs mt-2">{searchError}</p>}
-                </div>
-                <div className="mt-6 flex justify-end space-x-3">
-                  <Button variant="ghost" type="button" onClick={() => { setShowNewChat(false); setSearchError(''); setSearchPhone(''); }} className="text-[#54656f] dark:text-[#8696a0]">Cancel</Button>
-                  <Button type="submit" disabled={!searchPhone} className="bg-[#00a884] hover:bg-[#058b6e] text-white">Find & Chat</Button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {showCreateGroup && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#111b21] p-6 shadow-xl">
-              <h2 className="text-xl font-bold text-[#111b21] dark:text-[#e9edef] mb-4">Create New Group</h2>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-[#667781] dark:text-[#8696a0] mb-1">Group Name</label>
-                  <Input value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} placeholder="Enter group name..." className="w-full bg-transparent text-[#111b21] dark:text-[#e9edef] border-[#d1d7db] dark:border-[#222d34] focus-visible:ring-[#00a884]" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[#667781] dark:text-[#8696a0] mb-2">Select Participants</label>
-                  <div className="max-h-60 overflow-y-auto border border-[#d1d7db] dark:border-[#222d34] rounded-lg divide-y divide-[#f2f2f2] dark:divide-[#222d34]">
-                    {users.map(u => (
-                      <div key={u.id} className="flex items-center p-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] cursor-pointer" onClick={() => setSelectedUsers(prev => prev.includes(u.id) ? prev.filter(id => id !== u.id) : [...prev, u.id])}>
-                        <div className="relative h-10 w-10 shrink-0 mr-3">
-                          <div className="h-full w-full overflow-hidden rounded-full bg-[#dfe5e7] dark:bg-[#54656f]">
-                            {u.avatar_url ? <img src={u.avatar_url} alt={u.name} className="h-full w-full object-cover" /> : <UserIcon className="h-full w-full p-2 text-white" />}
-                          </div>
-                        </div>
-                        <div className="flex-1"><h3 className="font-medium text-[#111b21] dark:text-[#e9edef]">{u.name}</h3></div>
-                        <div className={`h-5 w-5 rounded-full border flex items-center justify-center ${selectedUsers.includes(u.id) ? 'bg-[#00a884] border-[#00a884]' : 'border-[#d1d7db] dark:border-[#8696a0]'}`}>
-                          {selectedUsers.includes(u.id) && <Check className="h-3 w-3 text-white" />}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <div className="mt-6 flex justify-end space-x-3">
-                <Button variant="ghost" onClick={() => { setShowCreateGroup(false); setNewGroupName(''); setSelectedUsers([]); }} className="text-[#54656f] dark:text-[#8696a0]">Cancel</Button>
-                <Button onClick={createGroup} disabled={!newGroupName.trim() || selectedUsers.length === 0} className="bg-[#00a884] hover:bg-[#058b6e] text-white">Create Group</Button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
