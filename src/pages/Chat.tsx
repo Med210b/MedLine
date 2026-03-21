@@ -199,8 +199,9 @@ export default function Chat() {
           supabase.from('messages').update({ status: 'delivered' }).eq('id', newMsg.id).then();
         }
 
-        if (newMsg.conversation_id.startsWith('conv-') && newMsg.conversation_id.includes(user?.id)) {
-           const otherId = newMsg.conversation_id.replace('conv-', '').split('-').find((id: string) => id !== user?.id);
+        // FIXED UUID EXTRACTION BUG: Using _ instead of -
+        if (newMsg.conversation_id.startsWith('conv_') && newMsg.conversation_id.includes(user?.id)) {
+           const otherId = newMsg.conversation_id.replace('conv_', '').split('_').find((id: string) => id !== user?.id);
            if (otherId && !usersRef.current.find(u => u.id === otherId)) {
              supabase.from('users').select('*').eq('id', otherId).single().then(({data}) => {
                if (data) setUsers(prev => {
@@ -265,9 +266,12 @@ export default function Chat() {
     return () => observer.current?.disconnect();
   }, [user?.id]);
 
+  // FIXED UUID EXTRACTION BUG
   const fetchAllChatMetadata = async () => {
     if (!user) return;
-    const { data: allUserMsgs } = await supabase.from('messages').select('*').ilike('conversation_id', `%${user.id}%`).order('timestamp', { ascending: true });
+    const { data: allUserMsgs, error } = await supabase.from('messages').select('*').ilike('conversation_id', `%${user.id}%`).order('timestamp', { ascending: true });
+    if (error) console.error("Error fetching chats:", error);
+    
     if (allUserMsgs) {
       const meta: Record<string, { lastMessage: any, unreadCount: number }> = {};
       const uniqueUserIds = new Set<string>();
@@ -278,8 +282,8 @@ export default function Chat() {
         if (m.sender_id !== user.id && m.status !== 'read') {
           meta[m.conversation_id].unreadCount += 1;
         }
-        if (m.conversation_id.startsWith('conv-')) {
-          const otherId = m.conversation_id.replace('conv-', '').split('-').find((id: string) => id !== user.id);
+        if (m.conversation_id.startsWith('conv_')) {
+          const otherId = m.conversation_id.replace('conv_', '').split('_').find((id: string) => id !== user.id);
           if (otherId) uniqueUserIds.add(otherId);
         }
       });
@@ -310,7 +314,8 @@ export default function Chat() {
   };
 
   const fetchMessages = async (conversationId: string) => {
-    const { data } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('timestamp', { ascending: true });
+    const { data, error } = await supabase.from('messages').select('*').eq('conversation_id', conversationId).order('timestamp', { ascending: true });
+    if (error) console.error("Fetch Messages Error:", error);
     if (data) {
       setMessages(data);
       const unreadIds = data.filter(m => m.sender_id !== user?.id && m.status !== 'read').map(m => m.id);
@@ -319,8 +324,9 @@ export default function Chat() {
     scrollToBottom();
   };
 
+  // FIXED UUID CREATION BUG: USING UNDERSCORE _
   const startConversation = async (otherUser: any) => {
-    const conversationId = `conv-${[user?.id, otherUser.id].sort().join('-')}`;
+    const conversationId = `conv_${[user?.id, otherUser.id].sort().join('_')}`;
     setActiveConversation({ id: conversationId, user: otherUser });
     setReplyingTo(null);
     setChatMeta(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], unreadCount: 0 } }));
@@ -344,7 +350,12 @@ export default function Chat() {
     const cleanPhone = searchPhone.replace(/\s+/g, '');
     const { data, error } = await supabase.from('users').select('*').eq('phone', cleanPhone).neq('id', user.id).limit(1);
     
-    if (error || !data || data.length === 0) { 
+    if (error) {
+      alert(`Database Search Error: ${error.message}`);
+      return;
+    }
+
+    if (!data || data.length === 0) { 
       setSearchError('No MedLine user found with this phone number.'); 
       return; 
     }
@@ -358,6 +369,7 @@ export default function Chat() {
     startConversation(contact); 
   };
 
+  // FIXED UUID CREATION BUG: USING UNDERSCORE _
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
     setNewMessage(e.target.value);
     if (!activeConversation || !channelRef.current) return;
@@ -375,7 +387,7 @@ export default function Chat() {
     }, 2000);
   };
 
-  // SEND MESSAGE (Optimistic UI + Timestamp fix)
+  // SEND MESSAGE
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeConversation || !user) return;
@@ -427,7 +439,6 @@ export default function Chat() {
       channelRef.current.send({ type: 'broadcast', event: 'typing_stop', payload: { user_id: user.id } }).catch(() => {});
     }
 
-    // EXPLICITLY INCLUDE TIMESTAMP SO THE DB DOES NOT REJECT IT
     const { error } = await supabase.from('messages').insert([{
       conversation_id: activeConversation.id,
       sender_id: user.id,
@@ -438,7 +449,8 @@ export default function Chat() {
     }]);
 
     if (error) {
-      console.error("Error saving message to database:", error);
+      alert(`Failed to send message!\nError: ${error.message}`);
+      console.error("Supabase Insert Error:", error);
     }
   };
 
@@ -450,14 +462,15 @@ export default function Chat() {
     try {
       await supabase.storage.from('chat-media').upload(fileName, file);
       const { data } = supabase.storage.from('chat-media').getPublicUrl(fileName);
-      await supabase.from('messages').insert([{
+      const { error } = await supabase.from('messages').insert([{
         conversation_id: activeConversation.id,
         sender_id: user?.id,
         content: data.publicUrl,
         type: 'image',
         status: 'sent',
-        timestamp: new Date().toISOString() // FIX: Add timestamp here too
+        timestamp: new Date().toISOString() 
       }]);
+      if (error) alert(`Failed to send image: ${error.message}`);
     } catch (err) { console.error('Error uploading image', err); }
   };
 
@@ -471,9 +484,13 @@ export default function Chat() {
       content: JSON.stringify({ name: newGroupName.trim(), participants }),
       type: 'group_created',
       status: 'sent',
-      timestamp: new Date().toISOString() // FIX: Add timestamp here too
+      timestamp: new Date().toISOString()
     };
-    await supabase.from('messages').insert([msg]);
+    const { error } = await supabase.from('messages').insert([msg]);
+    if (error) {
+      alert(`Failed to create group: ${error.message}`);
+      return;
+    }
     setShowCreateGroup(false);
     setNewGroupName('');
     setSelectedUsers([]);
@@ -548,7 +565,6 @@ export default function Chat() {
     }
   };
 
-  // Chat Context Menu Handlers
   const handleContextMenu = (e: React.MouseEvent, chat: any, convId: string) => {
     e.preventDefault();
     setContextMenu({ show: true, x: e.pageX, y: e.pageY, chat, convId });
@@ -591,16 +607,17 @@ export default function Chat() {
     if (activeConversation?.id === convId) setActiveConversation(null);
   };
 
+  // FIXED UUID CREATION BUG: USING UNDERSCORE _
   const processChatList = (chats: any[], isArchivedView = false) => {
     return chats.filter(item => {
-      const convId = item.isGroup ? item.id : `conv-${[user?.id, item.id].sort().join('-')}`;
+      const convId = item.isGroup ? item.id : `conv_${[user?.id, item.id].sort().join('_')}`;
       const matchesSearch = (item.name || item.phone || '').toLowerCase().includes(searchQuery.toLowerCase());
       const isArchived = archivedChats.includes(convId);
       const hasHistory = chatMeta[convId] !== undefined;
       return matchesSearch && (isArchivedView ? isArchived : (!isArchived && hasHistory));
     }).sort((a, b) => {
-      const idA = a.isGroup ? a.id : `conv-${[user?.id, a.id].sort().join('-')}`;
-      const idB = b.isGroup ? b.id : `conv-${[user?.id, b.id].sort().join('-')}`;
+      const idA = a.isGroup ? a.id : `conv_${[user?.id, a.id].sort().join('_')}`;
+      const idB = b.isGroup ? b.id : `conv_${[user?.id, b.id].sort().join('_')}`;
       
       const isAPinned = pinnedChats.includes(idA);
       const isBPinned = pinnedChats.includes(idB);
@@ -687,7 +704,7 @@ export default function Chat() {
                     ) : (
                       activeChatListItems.map(item => {
                         const isGroup = item.isGroup;
-                        const convId = isGroup ? item.id : `conv-${[user?.id, item.id].sort().join('-')}`;
+                        const convId = isGroup ? item.id : `conv_${[user?.id, item.id].sort().join('_')}`;
                         const meta = chatMeta[convId];
                         const isManualUnread = manualUnread.includes(convId);
                         const hasUnread = meta?.unreadCount > 0 || isManualUnread;
@@ -742,7 +759,7 @@ export default function Chat() {
                     <div className="p-8 text-center text-[14px] text-[#667781] dark:text-[#8696a0]">No recent calls</div>
                   ) : (
                     callHistory.map(call => {
-                      const otherUserId = call.conversation_id.replace('conv-', '').split('-').find((id: string) => id !== user?.id);
+                      const otherUserId = call.conversation_id.replace('conv_', '').split('_').find((id: string) => id !== user?.id);
                       const otherUser = users.find(u => u.id === otherUserId);
                       let callData = { type: 'voice', duration: 0 };
                       try { callData = JSON.parse(call.content); } catch (e) {}
@@ -797,7 +814,7 @@ export default function Chat() {
                  ) : (
                     archivedChatListItems.map(item => {
                       const isGroup = item.isGroup;
-                      const convId = isGroup ? item.id : `conv-${[user?.id, item.id].sort().join('-')}`;
+                      const convId = isGroup ? item.id : `conv_${[user?.id, item.id].sort().join('_')}`;
                       const meta = chatMeta[convId];
                       return (
                         <div key={item.id} className="flex cursor-pointer items-center px-3 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] transition-colors duration-200" 
