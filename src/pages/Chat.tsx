@@ -111,7 +111,7 @@ export default function Chat() {
   useEffect(() => { activeConversationRef.current = activeConversation; }, [activeConversation]);
   useEffect(() => { blockedUsersRef.current = blockedUsers; }, [blockedUsers]);
 
-  // CALL AUDIO REFS (FIX FOR RINGTONE AUTOPLAY)
+  // CALL AUDIO REFS
   const incomingAudioRef = useRef<HTMLAudioElement>(null);
   const outgoingAudioRef = useRef<HTMLAudioElement>(null);
 
@@ -128,7 +128,6 @@ export default function Chat() {
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const touchStartX = useRef<number>(0);
 
-  // HTML Audio tag controllers
   useEffect(() => {
     if (incomingCall && !currentCall) {
       incomingAudioRef.current?.play().catch(e => console.warn("Autoplay blocked. User needs to interact with page."));
@@ -255,6 +254,8 @@ export default function Chat() {
     const messageSubscription = supabase.channel('public:messages')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
         const newMsg = payload.new;
+        
+        // INTERCEPT AND BLOCK MESSAGES FROM BLOCKED USERS
         if (blockedUsersRef.current.includes(newMsg.sender_id)) return; 
 
         const currentActiveChat = activeConversationRef.current;
@@ -752,6 +753,9 @@ export default function Chat() {
     }
   };
 
+  // ---------------------------------------------------------
+  // RESTORED toggleVideo FUNCTION
+  // ---------------------------------------------------------
   const toggleVideo = async () => {
     if (!localStream || !currentCall) return;
     if (!isVideoOff) {
@@ -859,6 +863,17 @@ export default function Chat() {
   // ================= RENDER =================
   return (
     <div className="relative flex h-[100dvh] w-full bg-[#d1d7db] dark:bg-[#0a1014] overflow-hidden transition-colors duration-200">
+      {/* CSS For custom float animation */}
+      <style>{`
+        @keyframes float {
+          0% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+          100% { transform: translateY(0px); }
+        }
+        .animate-float {
+          animation: float 4s ease-in-out infinite;
+        }
+      `}</style>
       
       {/* THEME STRIP: Changed to EST Crimson Red */}
       <div className="absolute top-0 left-0 w-full h-[127px] bg-[#c62828] dark:bg-[#1a0a0a] z-0 hidden sm:block transition-colors duration-200"></div>
@@ -878,9 +893,9 @@ export default function Chat() {
                       {myProfile?.avatar_url ? <img src={myProfile.avatar_url} className="h-full w-full object-cover" /> : <UserIcon className="h-6 w-6 text-[#c62828] dark:text-[#aebac1]" />}
                   </div>
                   
-                  {/* EST HEADER LOGO */}
-                  <div className="hidden sm:flex items-center justify-center h-8 w-8 ml-2 rounded-full overflow-hidden border border-[#fbc02d] shadow-sm">
-                    <img src={APP_LOGO} alt="EST Logo" className="h-full w-full object-cover" />
+                  {/* EST HEADER LOGO - Correctly Cropped */}
+                  <div className="hidden sm:flex items-center justify-center h-8 w-8 ml-2 rounded-full overflow-hidden border border-[#fbc02d] shadow-sm bg-white">
+                    <img src={APP_LOGO} alt="EST Logo" className="h-full w-full object-cover scale-[1.2]" />
                   </div>
 
                 </div>
@@ -1246,7 +1261,7 @@ export default function Chat() {
              }}>
           {activeConversation ? (
             <>
-              {/* Chat Header */}
+              {/* Chat Header (REMOVED SEARCH & 3 DOTS) */}
               <div className="h-16 px-4 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center justify-between z-10 transition-colors duration-200 shrink-0">
                 <div className="flex items-center cursor-pointer min-w-0 flex-1" onClick={() => setShowContactInfo(true)}>
                   <Button variant="ghost" size="icon" className="sm:hidden mr-1 -ml-2 shrink-0 hover:text-[#c62828]" onClick={(e) => { e.stopPropagation(); setActiveConversation(null); }}>
@@ -1460,14 +1475,16 @@ export default function Chat() {
                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-[#c62828]/20 rounded-full blur-3xl animate-pulse"></div>
                <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#fbc02d]/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
 
-               {/* Modern 3D Glassmorphism Card */}
-               <div className="relative z-10 group perspective-1000">
-                 <div className="w-[90%] max-w-[450px] p-10 rounded-3xl bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/50 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_20px_50px_rgba(198,40,40,0.2)] transition-all duration-500 hover:-translate-y-2 flex flex-col items-center text-center">
+               {/* Modern 3D Glassmorphism Card (Animated float for mobile and web) */}
+               <div className="relative z-10 group perspective-1000 animate-float">
+                 <div className="w-[90%] max-w-[450px] p-10 rounded-3xl bg-white/60 dark:bg-black/40 backdrop-blur-xl border border-white/50 dark:border-white/10 shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all duration-500 flex flex-col items-center text-center">
                     
                     {/* EST Logo with spinning glow */}
                     <div className="relative w-36 h-36 mb-8">
                       <div className="absolute inset-[-10px] bg-gradient-to-r from-[#c62828] to-[#fbc02d] rounded-full animate-spin blur-lg opacity-70"></div>
-                      <img src={APP_LOGO} alt="EST Logo" className="relative z-10 w-full h-full rounded-full border-4 border-white dark:border-[#111b21] object-cover shadow-xl" />
+                      <div className="relative z-10 w-full h-full rounded-full border-4 border-white dark:border-[#111b21] overflow-hidden shadow-xl bg-white">
+                         <img src={APP_LOGO} alt="EST Logo" className="w-full h-full object-cover scale-[1.2]" />
+                      </div>
                     </div>
                     
                     <h1 className="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-[#c62828] to-[#fbc02d] mb-4">MedLine Ultra</h1>
@@ -1533,8 +1550,8 @@ export default function Chat() {
           <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-900 text-white">
             {incomingCall && !currentCall && (
               <div className="flex flex-col items-center space-y-8">
-                <div className="h-32 w-32 overflow-hidden rounded-full bg-slate-800 border-4 border-[#fbc02d] shadow-[0_0_30px_rgba(251,192,45,0.5)]">
-                  <UserIcon className="h-full w-full p-6 text-[#c62828]" />
+                <div className="h-32 w-32 overflow-hidden rounded-full bg-slate-800 border-4 border-[#fbc02d] shadow-[0_0_30px_rgba(251,192,45,0.5)] bg-white">
+                  <img src={APP_LOGO} alt="Incoming Call" className="h-full w-full object-cover scale-[1.2]" />
                 </div>
                 <h2 className="text-2xl font-bold animate-pulse text-[#fbc02d]">Incoming Call...</h2>
                 <div className="flex space-x-6">
@@ -1563,7 +1580,7 @@ export default function Chat() {
 
                 {!isVideo && (
                   <div className="flex h-full flex-col items-center justify-center space-y-8">
-                    <div className="h-32 w-32 overflow-hidden rounded-full bg-slate-800 border-4 border-[#fbc02d]"><UserIcon className="h-full w-full p-6 text-[#c62828]" /></div>
+                    <div className="h-32 w-32 overflow-hidden rounded-full bg-slate-800 border-4 border-[#fbc02d] bg-white"><img src={APP_LOGO} alt="Call" className="h-full w-full object-cover scale-[1.2]" /></div>
                     <h2 className="text-2xl font-bold text-[#fbc02d]">{remoteStream ? 'In Call' : 'Calling...'}</h2>
                     <p className="text-slate-300 font-mono text-xl font-medium">{remoteStream ? formatDuration(callDuration) : 'Connecting...'}</p>
                   </div>
