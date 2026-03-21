@@ -105,7 +105,7 @@ export default function Chat() {
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [filterIndex, setFilterIndex] = useState(0); // For video filters
+  const [filterIndex, setFilterIndex] = useState(0); 
   
   const callDurationRef = useRef(0);
   const previousCallRef = useRef<any>(null);
@@ -140,24 +140,20 @@ export default function Chat() {
     }
   }, []);
 
-  // FIXED RINGTONE LOGIC
   useEffect(() => {
     if (incomingCall && !currentCall) {
-      // We are receiving a call
       if (!ringtoneRef.current) {
         ringtoneRef.current = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg');
         ringtoneRef.current.loop = true;
       }
-      ringtoneRef.current.play().catch(e => console.error("Autoplay blocked. User needs to interact with page first.", e));
+      ringtoneRef.current.play().catch(e => console.error("Autoplay blocked.", e));
     } else if (currentCall && !remoteStream && isCaller) {
-      // We are dialing out
       if (!ringtoneRef.current) {
         ringtoneRef.current = new Audio('https://actions.google.com/sounds/v1/communications/telephone_ring.ogg');
         ringtoneRef.current.loop = true;
       }
       ringtoneRef.current.play().catch(e => console.error("Autoplay blocked.", e));
     } else {
-      // Call connected or ended, stop ringing
       if (ringtoneRef.current) {
         ringtoneRef.current.pause();
         ringtoneRef.current.currentTime = 0;
@@ -166,18 +162,11 @@ export default function Chat() {
     }
   }, [incomingCall, currentCall, remoteStream, isCaller]);
 
-  // Video streams mapping
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
-    }
-    // Force remote stream connection
+    if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream;
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
-      // Small timeout to ensure play() triggers after srcObject is set
-      setTimeout(() => {
-        remoteVideoRef.current?.play().catch(e => console.error("Remote video play error:", e));
-      }, 100);
+      setTimeout(() => remoteVideoRef.current?.play().catch(e => console.error("Remote play error:", e)), 100);
     }
   }, [localStream, remoteStream, currentCall]);
 
@@ -210,7 +199,6 @@ export default function Chat() {
     return () => { if (interval) clearInterval(interval); };
   }, [currentCall, remoteStream]);
 
-  // Apply Theme
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -221,13 +209,11 @@ export default function Chat() {
     localStorage.setItem('whatsapp_theme', theme);
   }, [theme]);
 
-  // Persist Local Arrays
   useEffect(() => { localStorage.setItem('whatsapp_archived', JSON.stringify(archivedChats)); }, [archivedChats]);
   useEffect(() => { localStorage.setItem('whatsapp_pinned', JSON.stringify(pinnedChats)); }, [pinnedChats]);
   useEffect(() => { localStorage.setItem('whatsapp_unread', JSON.stringify(manualUnread)); }, [manualUnread]);
   useEffect(() => { localStorage.setItem('whatsapp_sounds', soundsEnabled.toString()); }, [soundsEnabled]);
 
-  // Handle outside clicks for context menu
   useEffect(() => {
     const handleClick = () => {
       setContextMenu(null);
@@ -238,7 +224,6 @@ export default function Chat() {
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
-  // Initial Load & Presence
   useEffect(() => {
     if (!user) return;
     const fetchMyProfile = async () => {
@@ -254,10 +239,7 @@ export default function Chat() {
 
     const setOnlineStatus = async (status: boolean) => {
        if (privacyOnline !== 'everyone') return; 
-       await supabase.from('users').update({ 
-         is_online: status,
-         last_seen: new Date().toISOString() 
-       }).eq('id', user.id);
+       await supabase.from('users').update({ is_online: status, last_seen: new Date().toISOString() }).eq('id', user.id);
     };
     setOnlineStatus(true);
     
@@ -274,7 +256,6 @@ export default function Chat() {
     };
   }, [user, privacyOnline]);
 
-  // Load Data & Subscribe to Realtime
   useEffect(() => {
     if (!user) return;
     
@@ -287,7 +268,6 @@ export default function Chat() {
         const newMsg = payload.new;
         const currentActiveChat = activeConversationRef.current;
         
-        // Don't update unread counts for reactions
         if (newMsg.type !== 'reaction') {
           setChatMeta(prev => {
             const isMyMsg = newMsg.sender_id === user?.id;
@@ -408,7 +388,7 @@ export default function Chat() {
       const uniqueUserIds = new Set<string>();
 
       allUserMsgs.forEach(m => {
-        if (m.type === 'reaction') return; // Ignore reactions for chat list preview
+        if (m.type === 'reaction') return; 
         if (!meta[m.conversation_id]) meta[m.conversation_id] = { lastMessage: m, unreadCount: 0 };
         meta[m.conversation_id].lastMessage = m;
         if (m.sender_id !== user.id && m.status !== 'read') {
@@ -514,7 +494,6 @@ export default function Chat() {
     }, 2000);
   };
 
-  // SEND MESSAGE
   const sendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newMessage.trim() || !activeConversation || !user) return;
@@ -582,7 +561,6 @@ export default function Chat() {
     if (error) alert(`Failed to send message!\nError: ${error.message}`);
   };
 
-  // SEND REACTION
   const sendReaction = async (msgId: string, emoji: string) => {
     setMessageContextMenu(null);
     if (!activeConversation || !user) return;
@@ -612,7 +590,6 @@ export default function Chat() {
     }]);
   };
 
-  // AUDIO RECORDING LOGIC
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -665,7 +642,6 @@ export default function Chat() {
     }
   };
 
-  // GENERIC FILE UPLOAD
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0 || !activeConversation) return;
     const file = e.target.files[0];
@@ -793,7 +769,6 @@ export default function Chat() {
     setFilterIndex((prev) => (prev + 1) % FILTER_OPTIONS.length);
   };
 
-  // MENU HANDLERS
   const handleContextMenu = (e: React.MouseEvent, chat: any, convId: string) => {
     e.preventDefault();
     setContextMenu({ show: true, x: e.pageX, y: e.pageY, chat, convId });
@@ -813,11 +788,10 @@ export default function Chat() {
     setMessageContextMenu({ show: true, x, y, msg });
   };
 
-  // SWIPE LOGIC
   const handleTouchStart = (e: React.TouchEvent) => { touchStartX.current = e.touches[0].clientX; };
   const handleTouchEnd = (e: React.TouchEvent, msg: any) => {
     const touchEndX = e.changedTouches[0].clientX;
-    if (touchEndX - touchStartX.current > 50) { // Swipe Right to Reply
+    if (touchEndX - touchStartX.current > 50) { 
       setReplyingTo(msg);
     }
   };
@@ -876,7 +850,6 @@ export default function Chat() {
 
   // ================= RENDER =================
   return (
-    // FIX 1: Mobile Height Bug (h-[100dvh] handles dynamic browser toolbars on phones!)
     <div className="relative flex h-[100dvh] w-full bg-[#d1d7db] dark:bg-[#0a1014] overflow-hidden transition-colors duration-200">
       {/* Background Strip */}
       <div className="absolute top-0 left-0 w-full h-[127px] bg-[#00a884] dark:bg-[#202c33] z-0 hidden sm:block transition-colors duration-200"></div>
@@ -884,7 +857,7 @@ export default function Chat() {
       {/* Main App Container */}
       <div className="relative z-10 flex h-full w-full sm:h-[calc(100vh-38px)] sm:w-[calc(100vw-38px)] sm:mt-[19px] sm:mb-[19px] mx-auto bg-[#f0f2f5] dark:bg-[#111b21] sm:shadow-md sm:rounded-sm overflow-hidden max-w-[1600px] transition-colors duration-200">
         
-        {/* SIDEBAR (Hides on Mobile if Chat Open) */}
+        {/* MOBILE LAYOUT: SIDEBAR (hides on mobile when chat is active) */}
         <div className={`w-full sm:w-[400px] border-r border-[#d1d7db] dark:border-[#222d34] bg-white dark:bg-[#111b21] flex-col shrink-0 h-full relative transition-colors duration-200 ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
           
           {/* Main Chats/Calls View */}
@@ -917,6 +890,7 @@ export default function Chat() {
               <div className="flex-1 overflow-y-auto bg-white dark:bg-[#111b21] transition-colors duration-200 pb-20 sm:pb-0">
                 {activeTab === 'chats' ? (
                   <>
+                    {/* Archived Link */}
                     {archivedChats.length > 0 && (
                       <div className="flex cursor-pointer items-center px-3 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] transition-colors duration-200" onClick={() => setSidebarView('archived')}>
                          <div className="h-12 w-12 shrink-0 mr-3 flex items-center justify-center text-[#00a884]"><Archive className="h-5 w-5" /></div>
@@ -1269,7 +1243,7 @@ export default function Chat() {
                     </p>
                   </div>
                 </div>
-                <div className="flex space-x-1 sm:space-x-2 text-[#54656f] dark:text-[#aebac1] shrink-0 relative">
+                <div className="flex space-x-1 sm:space-x-2 text-[#54656f] dark:text-[#aebac1] shrink-0 items-center">
                   {!activeConversation.isGroup && (
                     <>
                       <Button variant="ghost" size="icon" onClick={() => initiateCall(activeConversation.user.id, true)}><Video className="h-5 w-5" /></Button>
@@ -1278,19 +1252,21 @@ export default function Chat() {
                   )}
                   <Button variant="ghost" size="icon"><Search className="h-5 w-5" /></Button>
                   
-                  {/* ... Header Menu */}
-                  <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setShowHeaderMenu(!showHeaderMenu); }}><MoreVertical className="h-5 w-5" /></Button>
-                  
-                  {showHeaderMenu && (
-                    <div className="absolute top-12 right-0 z-50 bg-white dark:bg-[#233138] shadow-lg rounded-md py-2 w-48 border border-slate-200 dark:border-slate-700" onClick={(e) => e.stopPropagation()}>
-                      <div className="px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[14px]" onClick={() => { setShowContactInfo(true); setShowHeaderMenu(false); }}>
-                         Contact info
+                  {/* ... Header Menu wrapper with RELATIVE positioning */}
+                  <div className="relative">
+                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setShowHeaderMenu(!showHeaderMenu); }}><MoreVertical className="h-5 w-5" /></Button>
+                    
+                    {showHeaderMenu && (
+                      <div className="absolute top-full right-0 mt-2 z-[100] bg-white dark:bg-[#233138] shadow-xl rounded-md py-2 w-48 border border-slate-200 dark:border-slate-700 origin-top-right transform transition-all" onClick={(e) => e.stopPropagation()}>
+                        <div className="px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[15px] transition-colors" onClick={() => { setShowContactInfo(true); setShowHeaderMenu(false); }}>
+                           Contact info
+                        </div>
+                        <div className="px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[15px] transition-colors" onClick={() => { deleteChatLocal(activeConversation.id); setShowHeaderMenu(false); }}>
+                           Close chat
+                        </div>
                       </div>
-                      <div className="px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[14px]" onClick={() => { deleteChatLocal(activeConversation.id); setShowHeaderMenu(false); }}>
-                         Close chat
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1371,7 +1347,7 @@ export default function Chat() {
 
               {/* Message Context Menu (Long press / right click) */}
               {messageContextMenu && (
-                <div className="fixed z-50 bg-white dark:bg-[#233138] shadow-lg rounded-xl py-2 w-auto min-w-[200px] border border-slate-200 dark:border-slate-700" 
+                <div className="fixed z-[100] bg-white dark:bg-[#233138] shadow-2xl rounded-xl py-2 w-auto min-w-[200px] border border-slate-200 dark:border-slate-700" 
                      style={{ top: messageContextMenu.y, left: messageContextMenu.x }}
                      onClick={(e) => e.stopPropagation()}>
                    {/* Quick Reactions Bar */}
@@ -1382,7 +1358,7 @@ export default function Chat() {
                        </button>
                      ))}
                    </div>
-                   <div className="px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[15px]" 
+                   <div className="px-4 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[15px]" 
                         onClick={() => { setReplyingTo(messageContextMenu.msg); setMessageContextMenu(null); }}>
                       Reply
                    </div>
