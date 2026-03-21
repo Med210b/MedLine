@@ -5,7 +5,7 @@ import { useCall } from '@/src/contexts/CallContext';
 import { supabase } from '@/src/lib/supabase';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
-import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Volume2, Moon } from 'lucide-react';
+import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Volume2, Moon, ChevronRight, Circle, CheckCircle2 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { playNotificationSound, showNotification } from '@/src/hooks/useNotifications';
 import PhoneInput from 'react-phone-number-input';
@@ -19,7 +19,7 @@ const formatChatTime = (dateString: string) => {
   return format(date, 'dd/MM/yyyy');
 };
 
-type SidebarView = 'chats' | 'calls' | 'settings' | 'profile';
+type SidebarView = 'chats' | 'calls' | 'settings' | 'profile' | 'privacy' | 'privacy-last-seen' | 'privacy-profile-photo';
 
 export default function Chat() {
   const { user, signOut } = useAuth();
@@ -36,9 +36,12 @@ export default function Chat() {
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState('');
   
-  // User Profile State
+  // User Profile & Privacy State
   const [myProfile, setMyProfile] = useState<any>(null);
   const [editName, setEditName] = useState('');
+  const [privacyLastSeen, setPrivacyLastSeen] = useState<'everyone' | 'contacts' | 'nobody'>('everyone');
+  const [privacyOnline, setPrivacyOnline] = useState<'everyone' | 'same_as_last_seen'>('everyone');
+  const [privacyProfilePhoto, setPrivacyProfilePhoto] = useState<'everyone' | 'contacts' | 'nobody'>('everyone');
 
   // Contacts & Meta
   const [users, setUsers] = useState<any[]>([]);
@@ -94,7 +97,11 @@ export default function Chat() {
     };
     fetchMyProfile();
 
-    const setOnlineStatus = async (status: boolean) => await supabase.from('users').update({ is_online: status }).eq('id', user.id);
+    const setOnlineStatus = async (status: boolean) => {
+       // Check privacy settings before broadcasting online status
+       if (privacyOnline !== 'everyone') return; 
+       await supabase.from('users').update({ is_online: status }).eq('id', user.id);
+    };
     setOnlineStatus(true);
     
     const handleVisibilityChange = () => setOnlineStatus(document.visibilityState === 'visible');
@@ -108,7 +115,7 @@ export default function Chat() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       setOnlineStatus(false);
     };
-  }, [user]);
+  }, [user, privacyOnline]);
 
   // Load Data & Subscribe to Realtime
   useEffect(() => {
@@ -123,7 +130,7 @@ export default function Chat() {
         const newMsg = payload.new;
         const currentActiveChat = activeConversationRef.current;
         
-        // Update Sidebar Meta
+        // Update Sidebar Meta (Discussion List)
         setChatMeta(prev => {
           const isMyMsg = newMsg.sender_id === user?.id;
           const isActiveChat = currentActiveChat?.id === newMsg.conversation_id;
@@ -139,13 +146,22 @@ export default function Chat() {
 
         // If this message belongs to the currently open chat window
         if (newMsg.conversation_id === currentActiveChat?.id) {
-          setMessages(prev => [...prev, newMsg]);
+          setMessages(prev => {
+             // Anti-duplication check for our fast optimistic UI
+             if (prev.some(m => m.id === newMsg.id)) return prev.map(m => m.id === newMsg.id ? newMsg : m);
+             const tempIndex = prev.findIndex(m => m.id.toString().startsWith('temp-') && m.sender_id === newMsg.sender_id && m.content === newMsg.content);
+             if (tempIndex !== -1) {
+               const newArr = [...prev];
+               newArr[tempIndex] = newMsg;
+               return newArr;
+             }
+             return [...prev, newMsg];
+          });
           scrollToBottom();
           if (newMsg.sender_id !== user?.id) {
             supabase.from('messages').update({ status: document.visibilityState === 'visible' ? 'read' : 'delivered' }).eq('id', newMsg.id).then();
           }
         } else if (newMsg.sender_id !== user?.id) {
-          // It's a background message
           playNotificationSound();
           if (document.visibilityState !== 'visible') showNotification("New Message", "You have a new message");
           supabase.from('messages').update({ status: 'delivered' }).eq('id', newMsg.id).then();
@@ -189,7 +205,7 @@ export default function Chat() {
       supabase.removeChannel(messageSubscription);
       supabase.removeChannel(userSubscription);
     };
-  }, [user?.id]); // Note: activeConversation is NO LONGER a dependency here!
+  }, [user?.id]); 
 
   // Call tracking effect
   useEffect(() => {
@@ -397,6 +413,7 @@ export default function Chat() {
     }, 2000);
   };
 
+  // SEND MESSAGE WITH OPTIMISTIC UI (Fix for messages not appearing instantly in discussion list)
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeConversation || !user) return;
@@ -419,7 +436,7 @@ export default function Chat() {
     }
 
     const tempId = `temp-${Date.now()}`;
-    const msg = {
+    const newMsgObj = {
       id: tempId,
       conversation_id: activeConversation.id,
       sender_id: user.id,
@@ -429,18 +446,26 @@ export default function Chat() {
       timestamp: new Date().toISOString()
     };
 
-    // Optimistically update UI so it feels instant
+    // OPTIMISTIC UI: Instantly clear input, add message to view, and update discussion sidebar!
     setNewMessage('');
     setReplyingTo(null);
+    setMessages(prev => [...prev, newMsgObj]);
+    setChatMeta(prev => ({
+      ...prev,
+      [activeConversation.id]: {
+         lastMessage: newMsgObj,
+         unreadCount: prev[activeConversation.id]?.unreadCount || 0
+      }
+    }));
+    scrollToBottom();
     
-    // Stop typing indicator
     if (isTyping && channelRef.current && channelRef.current.state === 'joined') {
       setIsTyping(false);
       clearTimeout(typingTimeoutRef.current!);
       channelRef.current.send({ type: 'broadcast', event: 'typing_stop', payload: { user_id: user.id } }).catch(() => {});
     }
 
-    // Send to database (Realtime subscription will pick up the real insert)
+    // Actually send it to the database
     await supabase.from('messages').insert([{
       conversation_id: activeConversation.id,
       sender_id: user.id,
@@ -578,7 +603,7 @@ export default function Chat() {
         {/* SIDEBAR */}
         <div className="w-full sm:w-[400px] border-r border-[#d1d7db] bg-white flex flex-col shrink-0 h-full relative">
           
-          {/* Main Chats Sidebar View */}
+          {/* Main Chats/Calls View */}
           {sidebarView === 'chats' || sidebarView === 'calls' ? (
             <>
               {/* Sidebar Header */}
@@ -769,6 +794,14 @@ export default function Chat() {
                     </div>
                   </div>
                   <div className="bg-white py-2 shadow-sm">
+                     {/* PRIVACY SETTINGS BUTTON */}
+                     <div className="flex items-center px-6 py-4 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => setSidebarView('privacy')}>
+                        <Lock className="h-5 w-5 text-[#8696a0] mr-6" />
+                        <div className="flex-1 flex justify-between items-center">
+                          <span className="text-[16px] text-[#111b21]">Privacy</span>
+                          <ChevronRight className="h-5 w-5 text-[#8696a0]" />
+                        </div>
+                     </div>
                      <div className="flex items-center px-6 py-4 cursor-pointer hover:bg-[#f5f6f6]">
                         <Bell className="h-5 w-5 text-[#8696a0] mr-6" />
                         <span className="text-[16px] text-[#111b21]">Notifications</span>
@@ -781,6 +814,77 @@ export default function Chat() {
                         <LogOut className="h-5 w-5 mr-6" />
                         <span className="text-[16px]">Log out</span>
                      </div>
+                  </div>
+               </div>
+            </div>
+          ) : sidebarView === 'privacy' ? (
+            /* PRIVACY SLIDE-IN MENU */
+            <div className="absolute inset-0 bg-[#f0f2f5] flex flex-col z-30 animate-in slide-in-from-right duration-300">
+               <div className="bg-[#008069] h-[108px] flex items-end pb-4 px-6 text-white shrink-0 shadow-sm">
+                 <div className="flex items-center cursor-pointer" onClick={() => setSidebarView('settings')}>
+                   <ArrowLeft className="h-6 w-6 mr-6" />
+                   <h1 className="text-[19px] font-medium">Privacy</h1>
+                 </div>
+               </div>
+               <div className="flex-1 overflow-y-auto bg-white py-2">
+                  <div className="px-6 py-4 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => setSidebarView('privacy-last-seen')}>
+                     <h3 className="text-[16px] text-[#111b21]">Last seen and online</h3>
+                     <p className="text-[14px] text-[#667781] mt-1">{privacyLastSeen === 'everyone' ? 'Everyone' : privacyLastSeen === 'contacts' ? 'My contacts' : 'Nobody'}</p>
+                  </div>
+                  <div className="px-6 py-4 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => setSidebarView('privacy-profile-photo')}>
+                     <h3 className="text-[16px] text-[#111b21]">Profile photo</h3>
+                     <p className="text-[14px] text-[#667781] mt-1">{privacyProfilePhoto === 'everyone' ? 'Everyone' : privacyProfilePhoto === 'contacts' ? 'My contacts' : 'Nobody'}</p>
+                  </div>
+               </div>
+            </div>
+          ) : sidebarView === 'privacy-last-seen' ? (
+            /* PRIVACY: LAST SEEN SLIDE-IN MENU */
+            <div className="absolute inset-0 bg-[#f0f2f5] flex flex-col z-40 animate-in slide-in-from-right duration-300">
+               <div className="bg-[#008069] h-[108px] flex items-end pb-4 px-6 text-white shrink-0 shadow-sm">
+                 <div className="flex items-center cursor-pointer" onClick={() => setSidebarView('privacy')}>
+                   <ArrowLeft className="h-6 w-6 mr-6" />
+                   <h1 className="text-[19px] font-medium">Last seen and online</h1>
+                 </div>
+               </div>
+               <div className="flex-1 overflow-y-auto">
+                  <div className="bg-white py-2 shadow-sm mb-4">
+                     <p className="px-6 py-3 text-[14px] text-[#008069] font-medium">Who can see my last seen</p>
+                     {['everyone', 'contacts', 'nobody'].map((option: any) => (
+                       <div key={option} className="flex items-center px-6 py-3 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => setPrivacyLastSeen(option)}>
+                         {privacyLastSeen === option ? <CheckCircle2 className="h-5 w-5 text-[#00a884] mr-4" /> : <Circle className="h-5 w-5 text-[#8696a0] mr-4" />}
+                         <span className="text-[16px] text-[#111b21]">{option === 'everyone' ? 'Everyone' : option === 'contacts' ? 'My contacts' : 'Nobody'}</span>
+                       </div>
+                     ))}
+                  </div>
+                  <div className="bg-white py-2 shadow-sm">
+                     <p className="px-6 py-3 text-[14px] text-[#008069] font-medium">Who can see when I'm online</p>
+                     {['everyone', 'same_as_last_seen'].map((option: any) => (
+                       <div key={option} className="flex items-center px-6 py-3 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => setPrivacyOnline(option)}>
+                         {privacyOnline === option ? <CheckCircle2 className="h-5 w-5 text-[#00a884] mr-4" /> : <Circle className="h-5 w-5 text-[#8696a0] mr-4" />}
+                         <span className="text-[16px] text-[#111b21]">{option === 'everyone' ? 'Everyone' : 'Same as last seen'}</span>
+                       </div>
+                     ))}
+                  </div>
+               </div>
+            </div>
+          ) : sidebarView === 'privacy-profile-photo' ? (
+            /* PRIVACY: PROFILE PHOTO SLIDE-IN MENU */
+            <div className="absolute inset-0 bg-[#f0f2f5] flex flex-col z-40 animate-in slide-in-from-right duration-300">
+               <div className="bg-[#008069] h-[108px] flex items-end pb-4 px-6 text-white shrink-0 shadow-sm">
+                 <div className="flex items-center cursor-pointer" onClick={() => setSidebarView('privacy')}>
+                   <ArrowLeft className="h-6 w-6 mr-6" />
+                   <h1 className="text-[19px] font-medium">Profile photo</h1>
+                 </div>
+               </div>
+               <div className="flex-1 overflow-y-auto">
+                  <div className="bg-white py-2 shadow-sm mb-4">
+                     <p className="px-6 py-3 text-[14px] text-[#008069] font-medium">Who can see my profile photo</p>
+                     {['everyone', 'contacts', 'nobody'].map((option: any) => (
+                       <div key={option} className="flex items-center px-6 py-3 cursor-pointer hover:bg-[#f5f6f6]" onClick={() => setPrivacyProfilePhoto(option)}>
+                         {privacyProfilePhoto === option ? <CheckCircle2 className="h-5 w-5 text-[#00a884] mr-4" /> : <Circle className="h-5 w-5 text-[#8696a0] mr-4" />}
+                         <span className="text-[16px] text-[#111b21]">{option === 'everyone' ? 'Everyone' : option === 'contacts' ? 'My contacts' : 'Nobody'}</span>
+                       </div>
+                     ))}
                   </div>
                </div>
             </div>
