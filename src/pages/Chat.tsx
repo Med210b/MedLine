@@ -324,7 +324,7 @@ export default function Chat() {
     setActiveConversation({ id: conversationId, user: otherUser });
     setReplyingTo(null);
     setChatMeta(prev => ({ ...prev, [conversationId]: { ...prev[conversationId], unreadCount: 0 } }));
-    setManualUnread(prev => prev.filter(id => id !== conversationId)); // Clear manual unread
+    setManualUnread(prev => prev.filter(id => id !== conversationId)); 
     fetchMessages(conversationId);
   };
 
@@ -336,15 +336,12 @@ export default function Chat() {
     fetchMessages(group.id);
   };
 
-  // 1. FIXED PHONE SEARCH LOGIC (removes spaces to prevent errors)
   const handleStartNewChat = async (e: React.FormEvent) => {
     e.preventDefault();
     setSearchError('');
     if (!searchPhone || !user) return;
     
-    // Clean up whitespace in case it was typed weirdly
     const cleanPhone = searchPhone.replace(/\s+/g, '');
-    
     const { data, error } = await supabase.from('users').select('*').eq('phone', cleanPhone).neq('id', user.id).limit(1);
     
     if (error || !data || data.length === 0) { 
@@ -358,7 +355,7 @@ export default function Chat() {
     setSearchPhone('');
     setSidebarView('chats');
     setActiveTab('chats');
-    startConversation(contact); // Automatically sets active conversation, switching the mobile view!
+    startConversation(contact); 
   };
 
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -378,6 +375,7 @@ export default function Chat() {
     }, 2000);
   };
 
+  // SEND MESSAGE (Optimistic UI + Timestamp fix)
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeConversation || !user) return;
@@ -413,6 +411,7 @@ export default function Chat() {
     setNewMessage('');
     setReplyingTo(null);
     setMessages(prev => [...prev, newMsgObj]);
+    
     setChatMeta(prev => ({
       ...prev,
       [activeConversation.id]: {
@@ -428,13 +427,19 @@ export default function Chat() {
       channelRef.current.send({ type: 'broadcast', event: 'typing_stop', payload: { user_id: user.id } }).catch(() => {});
     }
 
-    await supabase.from('messages').insert([{
+    // EXPLICITLY INCLUDE TIMESTAMP SO THE DB DOES NOT REJECT IT
+    const { error } = await supabase.from('messages').insert([{
       conversation_id: activeConversation.id,
       sender_id: user.id,
       content: msgContent,
       type: msgType,
-      status: 'sent'
+      status: 'sent',
+      timestamp: newMsgObj.timestamp
     }]);
+
+    if (error) {
+      console.error("Error saving message to database:", error);
+    }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -450,7 +455,8 @@ export default function Chat() {
         sender_id: user?.id,
         content: data.publicUrl,
         type: 'image',
-        status: 'sent'
+        status: 'sent',
+        timestamp: new Date().toISOString() // FIX: Add timestamp here too
       }]);
     } catch (err) { console.error('Error uploading image', err); }
   };
@@ -464,7 +470,8 @@ export default function Chat() {
       sender_id: user.id,
       content: JSON.stringify({ name: newGroupName.trim(), participants }),
       type: 'group_created',
-      status: 'sent'
+      status: 'sent',
+      timestamp: new Date().toISOString() // FIX: Add timestamp here too
     };
     await supabase.from('messages').insert([msg]);
     setShowCreateGroup(false);
@@ -575,7 +582,6 @@ export default function Chat() {
   };
 
   const deleteChatLocal = (convId: string) => {
-    // Local soft-delete by clearing its history from this view
     setChatMeta(prev => {
       const newMeta = { ...prev };
       delete newMeta[convId];
@@ -585,13 +591,11 @@ export default function Chat() {
     if (activeConversation?.id === convId) setActiveConversation(null);
   };
 
-  // Process sorting logic (Pins first, then date)
   const processChatList = (chats: any[], isArchivedView = false) => {
     return chats.filter(item => {
       const convId = item.isGroup ? item.id : `conv-${[user?.id, item.id].sort().join('-')}`;
       const matchesSearch = (item.name || item.phone || '').toLowerCase().includes(searchQuery.toLowerCase());
       const isArchived = archivedChats.includes(convId);
-      // Ensure we only show chats that actually have a history (or are brand new additions)
       const hasHistory = chatMeta[convId] !== undefined;
       return matchesSearch && (isArchivedView ? isArchived : (!isArchived && hasHistory));
     }).sort((a, b) => {
@@ -621,7 +625,7 @@ export default function Chat() {
       {/* Main App Container */}
       <div className="relative z-10 flex h-full w-full sm:h-[calc(100vh-38px)] sm:w-[calc(100vw-38px)] sm:mt-[19px] sm:mb-[19px] mx-auto bg-[#f0f2f5] dark:bg-[#111b21] sm:shadow-md sm:rounded-sm overflow-hidden max-w-[1600px] transition-colors duration-200">
         
-        {/* 2. FIXED MOBILE LAYOUT: SIDEBAR (hides on mobile when chat is active) */}
+        {/* MOBILE LAYOUT: SIDEBAR (hides on mobile when chat is active) */}
         <div className={`w-full sm:w-[400px] border-r border-[#d1d7db] dark:border-[#222d34] bg-white dark:bg-[#111b21] flex-col shrink-0 h-full relative transition-colors duration-200 ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
           
           {/* Main Chats/Calls View */}
@@ -695,9 +699,6 @@ export default function Chat() {
                             className={`flex cursor-pointer items-center px-3 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] ${activeConversation?.id === convId ? 'bg-[#f0f2f5] dark:bg-[#2a3942]' : ''} transition-colors duration-200`} 
                             onClick={() => isGroup ? startGroupConversation(item) : startConversation(item)}
                             onContextMenu={(e) => handleContextMenu(e, item, convId)}
-                            onTouchStart={() => {
-                              // Optional: Simple long-press logic for mobile can be added here
-                            }}
                           >
                               <div className="h-12 w-12 shrink-0 rounded-full overflow-hidden mr-3 flex items-center justify-center bg-[#dfe5e7] dark:bg-[#54656f]">
                                 {isGroup ? (
@@ -1028,7 +1029,7 @@ export default function Chat() {
 
         </div>
 
-        {/* 3. FIXED MOBILE LAYOUT: MAIN CHAT AREA (hides on mobile when NO chat is active) */}
+        {/* MAIN CHAT AREA / EMPTY STATE */}
         <div className={`flex-1 flex-col bg-[#efeae2] dark:bg-[#0b141a] relative overflow-hidden h-full sm:border-l border-[#d1d7db] dark:border-[#222d34] transition-colors duration-200 ${!activeConversation ? 'hidden sm:flex' : 'flex w-full sm:w-auto'}`} 
              style={{ 
                 backgroundImage: activeConversation 
