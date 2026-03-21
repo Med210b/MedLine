@@ -5,7 +5,7 @@ import { useCall } from '@/src/contexts/CallContext';
 import { supabase } from '@/src/lib/supabase';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
-import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical, Smile, FileText, StopCircle, Wand2 } from 'lucide-react';
+import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical, Smile, FileText, StopCircle } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { playNotificationSound, showNotification } from '@/src/hooks/useNotifications';
 import PhoneInput from 'react-phone-number-input';
@@ -21,16 +21,6 @@ const formatChatTime = (dateString: string) => {
 };
 
 type SidebarView = 'chats' | 'calls' | 'settings' | 'profile' | 'privacy' | 'privacy-last-seen' | 'privacy-profile-photo' | 'theme' | 'notifications' | 'archived';
-
-const FILTER_OPTIONS = [
-  'none',
-  'grayscale(100%)',
-  'sepia(100%)',
-  'invert(100%)',
-  'hue-rotate(90deg)',
-  'hue-rotate(180deg)',
-  'contrast(150%) saturate(120%)'
-];
 
 export default function Chat() {
   const { user, signOut } = useAuth();
@@ -50,19 +40,19 @@ export default function Chat() {
   // UI Panels
   const [showContactInfo, setShowContactInfo] = useState(false);
   const [showHeaderMenu, setShowHeaderMenu] = useState(false);
-
-  // User Profile & Privacy State
+  
+  // User Profile States
   const [myProfile, setMyProfile] = useState<any>(null);
   const [editName, setEditName] = useState('');
-  const [privacyLastSeen, setPrivacyLastSeen] = useState<'everyone' | 'contacts' | 'nobody'>('everyone');
-  const [privacyOnline, setPrivacyOnline] = useState<'everyone' | 'same_as_last_seen'>('everyone');
-  const [privacyProfilePhoto, setPrivacyProfilePhoto] = useState<'everyone' | 'contacts' | 'nobody'>('everyone');
-  const [statusOverride, setStatusOverride] = useState<'online' | 'offline'>('online');
 
-  // Settings States (Persisted)
+  // Settings States
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(localStorage.getItem('whatsapp_theme') as any || 'system');
   const [soundsEnabled, setSoundsEnabled] = useState(localStorage.getItem('whatsapp_sounds') !== 'false');
-  
+  const [privacyLastSeen, setPrivacyLastSeen] = useState<'everyone' | 'contacts' | 'nobody'>(localStorage.getItem('whatsapp_privacy_last_seen') as any || 'everyone');
+  const [privacyOnline, setPrivacyOnline] = useState<'everyone' | 'same_as_last_seen'>(localStorage.getItem('whatsapp_privacy_online') as any || 'everyone');
+  const [privacyProfilePhoto, setPrivacyProfilePhoto] = useState<'everyone' | 'contacts' | 'nobody'>(localStorage.getItem('whatsapp_privacy_profile_photo') as any || 'everyone');
+  const [statusOverride, setStatusOverride] = useState<'online' | 'offline'>(localStorage.getItem('whatsapp_status_override') as any || 'online');
+
   // Chat Organization States
   const [archivedChats, setArchivedChats] = useState<string[]>(JSON.parse(localStorage.getItem('whatsapp_archived') || '[]'));
   const [pinnedChats, setPinnedChats] = useState<string[]>(JSON.parse(localStorage.getItem('whatsapp_pinned') || '[]'));
@@ -102,11 +92,9 @@ export default function Chat() {
   useEffect(() => { chatMetaRef.current = chatMeta; }, [chatMeta]);
   useEffect(() => { activeConversationRef.current = activeConversation; }, [activeConversation]);
 
-  // CALL STATES
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
-  const [filterIndex, setFilterIndex] = useState(0); 
   
   const callDurationRef = useRef(0);
   const previousCallRef = useRef<any>(null);
@@ -141,6 +129,7 @@ export default function Chat() {
     }
   }, []);
 
+  // Call Ringtone logic
   useEffect(() => {
     if (incomingCall && !currentCall) {
       if (!ringtoneRef.current) {
@@ -195,12 +184,11 @@ export default function Chat() {
       setCallDuration(0);
       setIsMuted(false);
       setIsVideoOff(false);
-      setFilterIndex(0);
     }
     return () => { if (interval) clearInterval(interval); };
   }, [currentCall, remoteStream]);
 
-  // Apply Theme
+  // Apply Theme & Persist Settings
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -211,13 +199,17 @@ export default function Chat() {
     localStorage.setItem('whatsapp_theme', theme);
   }, [theme]);
 
-  // Persist Local Arrays
-  useEffect(() => { localStorage.setItem('whatsapp_archived', JSON.stringify(archivedChats)); }, [archivedChats]);
-  useEffect(() => { localStorage.setItem('whatsapp_pinned', JSON.stringify(pinnedChats)); }, [pinnedChats]);
-  useEffect(() => { localStorage.setItem('whatsapp_unread', JSON.stringify(manualUnread)); }, [manualUnread]);
-  useEffect(() => { localStorage.setItem('whatsapp_sounds', soundsEnabled.toString()); }, [soundsEnabled]);
+  useEffect(() => { 
+    localStorage.setItem('whatsapp_archived', JSON.stringify(archivedChats)); 
+    localStorage.setItem('whatsapp_pinned', JSON.stringify(pinnedChats)); 
+    localStorage.setItem('whatsapp_unread', JSON.stringify(manualUnread)); 
+    localStorage.setItem('whatsapp_sounds', soundsEnabled.toString());
+    localStorage.setItem('whatsapp_privacy_last_seen', privacyLastSeen);
+    localStorage.setItem('whatsapp_privacy_online', privacyOnline);
+    localStorage.setItem('whatsapp_privacy_profile_photo', privacyProfilePhoto);
+    localStorage.setItem('whatsapp_status_override', statusOverride);
+  }, [archivedChats, pinnedChats, manualUnread, soundsEnabled, privacyLastSeen, privacyOnline, privacyProfilePhoto, statusOverride]);
 
-  // Handle outside clicks for context menu
   useEffect(() => {
     const handleClick = () => {
       setContextMenu(null);
@@ -228,7 +220,7 @@ export default function Chat() {
     return () => document.removeEventListener('click', handleClick);
   }, []);
 
-  // Initial Load & Presence
+  // Presence Logic with Status Override
   useEffect(() => {
     if (!user) return;
     const fetchMyProfile = async () => {
@@ -244,8 +236,13 @@ export default function Chat() {
 
     const setOnlineStatus = async (status: boolean) => {
        if (privacyOnline !== 'everyone') return; 
-       if (statusOverride === 'offline') return;
-       await supabase.from('users').update({ is_online: status, last_seen: new Date().toISOString() }).eq('id', user.id);
+       // Override status if set to offline
+       if (statusOverride === 'offline') status = false;
+
+       await supabase.from('users').update({ 
+         is_online: status, 
+         last_seen: new Date().toISOString() 
+       }).eq('id', user.id);
     };
     setOnlineStatus(true);
     
@@ -260,7 +257,7 @@ export default function Chat() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       setOnlineStatus(false);
     };
-  }, [user, privacyOnline, statusOverride, navigate]);
+  }, [user, privacyOnline, statusOverride]);
 
   // Load Data & Subscribe to Realtime
   useEffect(() => {
@@ -307,7 +304,7 @@ export default function Chat() {
           }
         } else if (newMsg.sender_id !== user?.id && newMsg.type !== 'reaction') {
           playReceiveSound();
-          if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+          if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted' && soundsEnabled) {
              const senderUser = usersRef.current.find(u => u.id === newMsg.sender_id);
              new Notification(senderUser?.name || "MedLine", { 
                body: newMsg.type === 'text' ? newMsg.content : (newMsg.type === 'audio' ? '🎤 Voice message' : '📎 Attachment'),
@@ -772,10 +769,6 @@ export default function Chat() {
     }
   };
 
-  const cycleFilter = () => {
-    setFilterIndex((prev) => (prev + 1) % FILTER_OPTIONS.length);
-  };
-
   const handleContextMenu = (e: React.MouseEvent, chat: any, convId: string) => {
     e.preventDefault();
     setContextMenu({ show: true, x: e.pageX, y: e.pageY, chat, convId });
@@ -783,6 +776,7 @@ export default function Chat() {
   
   const handleMessageContextMenu = (e: React.MouseEvent | React.TouchEvent, msg: any) => {
     if (e.type === 'contextmenu') e.preventDefault();
+    
     let x, y;
     if ('touches' in e) {
       x = e.touches[0].pageX;
@@ -863,7 +857,7 @@ export default function Chat() {
       {/* Main App Container */}
       <div className="relative z-10 flex h-full w-full sm:h-[calc(100vh-38px)] sm:w-[calc(100vw-38px)] sm:mt-[19px] sm:mb-[19px] mx-auto bg-[#f0f2f5] dark:bg-[#111b21] sm:shadow-md sm:rounded-sm overflow-hidden max-w-[1600px] transition-colors duration-200">
         
-        {/* SIDEBAR (Hides on Mobile if Chat Open) */}
+        {/* MOBILE LAYOUT: SIDEBAR (hides on mobile when chat is active) */}
         <div className={`w-full sm:w-[400px] border-r border-[#d1d7db] dark:border-[#222d34] bg-white dark:bg-[#111b21] flex-col shrink-0 h-full relative transition-colors duration-200 ${activeConversation ? 'hidden sm:flex' : 'flex'}`}>
           
           {/* Main Chats/Calls View */}
@@ -896,7 +890,6 @@ export default function Chat() {
               <div className="flex-1 overflow-y-auto bg-white dark:bg-[#111b21] transition-colors duration-200 pb-20 sm:pb-0">
                 {activeTab === 'chats' ? (
                   <>
-                    {/* Archived Link */}
                     {archivedChats.length > 0 && (
                       <div className="flex cursor-pointer items-center px-3 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#202c33] transition-colors duration-200" onClick={() => setSidebarView('archived')}>
                          <div className="h-12 w-12 shrink-0 mr-3 flex items-center justify-center text-[#00a884]"><Archive className="h-5 w-5" /></div>
@@ -1052,6 +1045,19 @@ export default function Chat() {
                      </div>
                      <p className="text-[14px] text-[#8696a0] mt-4">This is not your username or pin. This name will be visible to your MedLine contacts.</p>
                   </div>
+                  <div className="w-full bg-white dark:bg-[#111b21] p-4 mt-3 sm:px-7 shadow-sm transition-colors duration-200">
+                     <p className="text-[#008069] dark:text-[#00a884] text-[14px] mb-4">Manual Status Override</p>
+                     <div className="space-y-3">
+                       <label className="flex items-center space-x-3 text-[16px] text-[#111b21] dark:text-[#e9edef] cursor-pointer">
+                         <input type="radio" className="accent-[#00a884] w-4 h-4" checked={statusOverride === 'online'} onChange={() => setStatusOverride('online')} /> 
+                         <span>Online (Default)</span>
+                       </label>
+                       <label className="flex items-center space-x-3 text-[16px] text-[#111b21] dark:text-[#e9edef] cursor-pointer">
+                         <input type="radio" className="accent-[#00a884] w-4 h-4" checked={statusOverride === 'offline'} onChange={() => setStatusOverride('offline')} /> 
+                         <span>Offline (Hidden)</span>
+                       </label>
+                     </div>
+                  </div>
                </div>
             </div>
           ) : sidebarView === 'settings' ? (
@@ -1198,7 +1204,7 @@ export default function Chat() {
 
           {/* GLOBAL CONTEXT MENU OVERLAY (Sidebar list) */}
           {contextMenu && (
-             <div className="fixed z-[100] bg-white dark:bg-[#233138] shadow-lg rounded-md py-2 w-48 border border-slate-200 dark:border-slate-700" 
+             <div className="fixed z-[9999] bg-white dark:bg-[#233138] shadow-2xl rounded-md py-2 w-48 border border-slate-200 dark:border-slate-700" 
                   style={{ top: contextMenu.y, left: contextMenu.x }}
                   onClick={(e) => e.stopPropagation()}>
                 <div className="px-4 py-2 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[14px]" onClick={() => toggleArchive(contextMenu.convId)}>
@@ -1215,7 +1221,6 @@ export default function Chat() {
                 </div>
              </div>
           )}
-
         </div>
 
         {/* MAIN CHAT AREA */}
@@ -1250,7 +1255,7 @@ export default function Chat() {
                     </p>
                   </div>
                 </div>
-                <div className="flex space-x-1 sm:space-x-2 text-[#54656f] dark:text-[#aebac1] shrink-0 relative items-center">
+                <div className="flex space-x-1 sm:space-x-2 text-[#54656f] dark:text-[#aebac1] shrink-0 items-center">
                   {!activeConversation.isGroup && (
                     <>
                       <Button variant="ghost" size="icon" onClick={() => initiateCall(activeConversation.user.id, true)}><Video className="h-5 w-5" /></Button>
@@ -1259,12 +1264,14 @@ export default function Chat() {
                   )}
                   <Button variant="ghost" size="icon"><Search className="h-5 w-5" /></Button>
                   
-                  {/* Header Menu wrapper with RELATIVE positioning */}
+                  {/* RESTORED & FIXED 3-DOT MENU */}
                   <div className="relative">
-                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setShowHeaderMenu(!showHeaderMenu); }}><MoreVertical className="h-5 w-5" /></Button>
+                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setShowHeaderMenu(!showHeaderMenu); }}>
+                      <MoreVertical className="h-5 w-5" />
+                    </Button>
                     
                     {showHeaderMenu && (
-                      <div className="absolute top-full right-0 mt-2 z-[100] bg-white dark:bg-[#233138] shadow-xl rounded-md py-2 w-48 border border-slate-200 dark:border-slate-700 origin-top-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="absolute top-full right-0 mt-2 z-[9999] bg-white dark:bg-[#233138] shadow-2xl rounded-md py-2 w-48 border border-slate-200 dark:border-slate-700 origin-top-right transform transition-all" onClick={(e) => e.stopPropagation()}>
                         <div className="px-5 py-3 hover:bg-[#f5f6f6] dark:hover:bg-[#182229] cursor-pointer text-[#111b21] dark:text-[#e9edef] text-[15px] transition-colors" onClick={() => { setShowContactInfo(true); setShowHeaderMenu(false); }}>
                            Contact info
                         </div>
@@ -1337,7 +1344,7 @@ export default function Chat() {
 
                           {/* Render Inline Emoji Reactions */}
                           {messageReactions.length > 0 && (
-                            <div className={`absolute -bottom-3 ${isMe ? 'right-0' : 'left-0'} flex items-center bg-white dark:bg-[#202c33] rounded-full px-1.5 py-0.5 shadow-sm border border-slate-100 dark:border-[#222d34] text-xs z-10`}>
+                            <div className={`absolute -bottom-3 ${isMe ? 'right-0' : 'left-0'} flex items-center bg-white dark:bg-[#202c33] rounded-full px-1.5 py-0.5 shadow-sm border border-slate-100 dark:border-[#222d34] text-xs`}>
                                {messageReactions.map((r, i) => (
                                  <span key={i}>{JSON.parse(r.content).emoji}</span>
                                ))}
@@ -1354,7 +1361,7 @@ export default function Chat() {
 
               {/* Message Context Menu (Long press / right click) */}
               {messageContextMenu && (
-                <div className="fixed z-[100] bg-white dark:bg-[#233138] shadow-2xl rounded-xl py-2 w-auto min-w-[200px] border border-slate-200 dark:border-slate-700" 
+                <div className="fixed z-[9999] bg-white dark:bg-[#233138] shadow-2xl rounded-xl py-2 w-auto min-w-[200px] border border-slate-200 dark:border-slate-700" 
                      style={{ top: messageContextMenu.y, left: messageContextMenu.x }}
                      onClick={(e) => e.stopPropagation()}>
                    {/* Quick Reactions Bar */}
@@ -1461,9 +1468,9 @@ export default function Chat() {
           )}
         </div>
 
-        {/* RIGHT SIDEBAR: CONTACT INFO (Slide in) */}
+        {/* RIGHT SIDEBAR: CONTACT INFO (Slide in over chat on mobile, beside chat on desktop) */}
         {showContactInfo && activeConversation && !activeConversation.isGroup && (
-           <div className="hidden sm:flex w-[350px] border-l border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#111b21] flex-col z-20 animate-in slide-in-from-right duration-300">
+           <div className="absolute inset-0 sm:relative sm:inset-auto sm:flex w-full sm:w-[350px] border-l border-[#d1d7db] dark:border-[#222d34] bg-[#f0f2f5] dark:bg-[#111b21] flex-col z-[60] animate-in slide-in-from-right duration-300">
               <div className="h-16 px-6 bg-[#f0f2f5] dark:bg-[#202c33] flex items-center shadow-sm shrink-0">
                  <Button variant="ghost" size="icon" onClick={() => setShowContactInfo(false)} className="mr-4 text-[#54656f] dark:text-[#aebac1]">
                    <X className="h-5 w-5" />
@@ -1490,7 +1497,7 @@ export default function Chat() {
            </div>
         )}
 
-        {/* CALL UI OVERLAY - FIXED RINGTONE AND HANGUP */}
+        {/* CALL UI OVERLAY */}
         {(incomingCall || currentCall) && (
           <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-900 text-white">
             {incomingCall && !currentCall && (
@@ -1511,14 +1518,7 @@ export default function Chat() {
                 {isVideo && (
                   <>
                     <video ref={remoteVideoRef} autoPlay playsInline className="h-full w-full object-cover" />
-                    <video 
-                      ref={localVideoRef} 
-                      autoPlay 
-                      playsInline 
-                      muted 
-                      style={{ filter: FILTER_OPTIONS[filterIndex] }}
-                      className={`absolute bottom-8 right-8 h-48 w-32 rounded-xl object-cover shadow-2xl border-2 border-white/20 transition-opacity ${isVideoOff ? 'opacity-0' : 'opacity-100'}`} 
-                    />
+                    <video ref={localVideoRef} autoPlay playsInline muted className={`absolute bottom-8 right-8 h-48 w-32 rounded-xl object-cover shadow-2xl border-2 border-white/20 transition-opacity ${isVideoOff ? 'opacity-0' : 'opacity-100'}`} />
                   </>
                 )}
 
@@ -1534,18 +1534,11 @@ export default function Chat() {
                   <Button onClick={toggleMute} className={`h-16 w-16 rounded-full transition-colors ${isMuted ? 'bg-red-500' : 'bg-slate-600'}`}>
                     {isMuted ? <MicOff className="h-8 w-8 text-white" /> : <Mic className="h-8 w-8 text-white" />}
                   </Button>
-
                   {isVideo && (
-                    <>
-                      <Button onClick={toggleVideo} className={`h-16 w-16 rounded-full transition-colors ${isVideoOff ? 'bg-red-500' : 'bg-slate-600'}`}>
-                        {isVideoOff ? <VideoOff className="h-8 w-8 text-white" /> : <Video className="h-8 w-8 text-white" />}
-                      </Button>
-                      <Button onClick={cycleFilter} className="h-16 w-16 rounded-full bg-indigo-500 hover:bg-indigo-600">
-                        <Wand2 className="h-8 w-8 text-white" />
-                      </Button>
-                    </>
+                    <Button onClick={toggleVideo} className={`h-16 w-16 rounded-full transition-colors ${isVideoOff ? 'bg-red-500' : 'bg-slate-600'}`}>
+                      {isVideoOff ? <VideoOff className="h-8 w-8 text-white" /> : <Video className="h-8 w-8 text-white" />}
+                    </Button>
                   )}
-
                   <Button onClick={() => endCall()} className="h-16 w-16 rounded-full bg-red-500 hover:bg-red-600">
                     <Phone className="h-8 w-8 rotate-[135deg] text-white" />
                   </Button>
