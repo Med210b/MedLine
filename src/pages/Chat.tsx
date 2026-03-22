@@ -8,6 +8,7 @@ import { Input } from '@/src/components/ui/input';
 import { Phone, Video, Send, Image as ImageIcon, Paperclip, LogOut, User as UserIcon, Check, CheckCheck, Mic, MicOff, VideoOff, Settings, Search, Reply, X, MessageSquarePlus, Lock, Laptop, Smartphone, ArrowLeft, Camera, Bell, Moon, ChevronRight, Circle, CheckCircle2, Archive, Pin, MoreVertical, Smile, FileText, StopCircle, Wand2 } from 'lucide-react';
 import { format, isToday, isYesterday } from 'date-fns';
 import { playNotificationSound, showNotification } from '@/src/hooks/useNotifications';
+import { usePushNotifications } from '@/src/hooks/usePushNotifications'; // PUSH NOTIFICATIONS ADDED
 import PhoneInput from 'react-phone-number-input';
 import 'react-phone-number-input/style.css';
 import EmojiPicker, { Theme } from 'emoji-picker-react';
@@ -27,19 +28,13 @@ const formatChatTime = (dateString: string) => {
 
 type SidebarView = 'chats' | 'calls' | 'settings' | 'profile' | 'privacy' | 'privacy-last-seen' | 'privacy-profile-photo' | 'theme' | 'notifications' | 'archived';
 
-const FILTER_OPTIONS = [
-  'none',
-  'grayscale(100%)',
-  'sepia(100%)',
-  'invert(100%)',
-  'hue-rotate(90deg)',
-  'hue-rotate(180deg)',
-  'contrast(150%) saturate(120%)'
-];
-
 export default function Chat() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  
+  // WAKE UP PUSH NOTIFICATIONS ON LOAD
+  usePushNotifications(); 
+
   const { initiateCall, incomingCall, currentCall, answerCall, rejectCall, endCall, localStream, remoteStream, isVideo, isCaller, cycleFilter, filterIndex, FILTER_OPTIONS: contextFilters } = useCall();
   
   const [sidebarView, setSidebarView] = useState<SidebarView>('chats');
