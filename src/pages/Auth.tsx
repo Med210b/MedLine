@@ -1,387 +1,239 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/src/lib/supabase';
 import { Button } from '@/src/components/ui/button';
 import { Input } from '@/src/components/ui/input';
-import { Label } from '@/src/components/ui/label';
-import { Mail, User, ArrowLeft, Lock } from 'lucide-react';
+import { Eye, EyeOff, Camera, User as UserIcon, Lock, ShieldCheck } from 'lucide-react';
 import PhoneInput from 'react-phone-number-input';
-import 'react-phone-number-input/style.css'; 
+import 'react-phone-number-input/style.css';
 
-type AuthStep = 'phone' | 'profile' | 'credentials' | 'otp';
-type AuthMode = 'signup' | 'login';
+const APP_LOGO = 'https://i.postimg.cc/hGWD8Fx8/wkx78803bxrmt0cx25brw9e388-result-0.jpg';
 
 export default function Auth() {
   const navigate = useNavigate();
-  
-  // 1. Core State
-  const [mode, setMode] = useState<AuthMode>('login'); // Default to login to make it faster for returning users
-  const [step, setStep] = useState<AuthStep>('credentials');
+  const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
-  // 2. Form States
-  const [phone, setPhone] = useState<string | undefined>(''); 
-  const [name, setName] = useState('');
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [avatarPreview, setAvatarPreview] = useState<string>('');
-  const [email, setEmail] = useState('');
+  // Form Fields
+  const [phone, setPhone] = useState<string | undefined>('');
   const [password, setPassword] = useState('');
-  const [emailOtp, setEmailOtp] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  
+  // Avatar Upload
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 3. UI Helpers
-  const goBack = (to: AuthStep) => {
-    setError(null);
-    setStep(to);
-  }
-
-  const switchToLogin = () => {
-    setMode('login');
-    setStep('credentials');
-    setError(null);
-    setPassword('');
-  }
-
-  const switchToSignup = () => {
-    setMode('signup');
-    setStep('phone');
-    setError(null);
-    setPassword('');
-  }
-
-  const handleAvatarSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setError(null);
-    if (!event.target.files || event.target.files.length === 0) return;
-    const file = event.target.files[0];
-    setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      setAvatarFile(file);
+      setAvatarPreview(URL.createObjectURL(file));
+    }
   };
 
-  // 4. Submission Handlers
-  const submitPhone = (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    setLoading(true);
+
     if (!phone) {
-      setError("Please enter a valid phone number.");
-      return;
-    }
-    setError(null);
-    setStep('profile');
-  };
-
-  const submitProfile = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      setError("Please enter your name.");
-      return;
-    }
-    setError(null);
-    setStep('credentials');
-  };
-
-  // SIGN UP: Creates account and triggers the OTP email
-  const submitSignupCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || password.length < 6) {
-      setError("Please enter a valid email and a password (at least 6 characters).");
-      return;
-    }
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // Create the user with email and password
-      const { error: signUpError } = await supabase.auth.signUp({ 
-        email, 
-        password 
-      });
-      if (signUpError) throw signUpError;
-      
-      // Move to OTP to verify their email
-      setStep('otp');
-    } catch (err: any) {
-      setError(err.message || "Failed to create account. Email may already be in use.");
-    } finally {
+      setError('Please enter a valid phone number.');
       setLoading(false);
-    }
-  };
-
-  // LOG IN: Directly logs in existing users using Email + Password (NO OTP)
-  const submitLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) {
-      setError("Please enter your email and password.");
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    // THE GENIUS TRICK: Map phone number to a hidden dummy email!
+    const cleanPhone = phone.replace(/\s+/g, '');
+    const dummyEmail = `${cleanPhone}@medline.app`;
 
     try {
-      // Sign in directly!
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      if (isSignUp) {
+        // --- SIGN UP FLOW ---
+        if (password !== confirmPassword) throw new Error('Passwords do not match!');
+        if (password.length < 6) throw new Error('Password must be at least 6 characters.');
+        if (!name.trim() || !username.trim()) throw new Error('Name and Username are required.');
+        if (!avatarFile) throw new Error('Please upload a profile picture.');
 
-      if (signInError || !data.user) throw signInError || new Error("Login failed.");
+        // 1. Create account with Password (NO OTP REQUIRED)
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email: dummyEmail,
+          password: password,
+        });
 
-      // Update their online status
-      await supabase.from('users').update({
-        is_online: true,
-        last_seen: new Date().toISOString()
-      }).eq('id', data.user.id);
-      
-      navigate('/chat');
-    } catch (err: any) {
-      setError("Invalid email or password.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // FINAL VERIFICATION (Only for Sign Up)
-  const verifySignupOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (emailOtp.length !== 8) {
-      setError("The verification code must be exactly 8 numbers.");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      // Verify the signup OTP
-      const { data: { user: authUser }, error: verifyError } = await supabase.auth.verifyOtp({
-        email,
-        token: emailOtp,
-        type: 'signup', // Important: Type is 'signup' because we used signUp()
-      });
-      
-      if (verifyError || !authUser) throw verifyError || new Error("Auth failed.");
-
-      // Upload avatar
-      let uploadedAvatarUrl = '';
-      if (avatarFile) {
-        const fileExt = avatarFile.name.split('.').pop();
-        const fileName = `${authUser.id}-${Date.now()}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, avatarFile);
-
-        if (!uploadError) {
-          const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
-          uploadedAvatarUrl = data.publicUrl;
+        if (authError) {
+          if (authError.message.includes('already registered')) {
+            throw new Error('This phone number is already registered. Please log in.');
+          }
+          throw authError;
         }
-      }
 
-      // Save new profile
-      const updates = {
-        id: authUser.id,
-        name,
-        avatar_url: uploadedAvatarUrl,
-        phone, 
-        email,
-        is_online: true,
-        last_seen: new Date().toISOString(),
-      };
-      
-      const { error: dbError } = await supabase.from('users').upsert(updates);
-      if (dbError) throw dbError;
-      
-      navigate('/chat');
+        const user = authData.user;
+        if (!user) throw new Error('Signup failed. Please try again.');
+
+        // 2. Upload Avatar
+        const fileExt = avatarFile.name.split('.').pop();
+        const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, avatarFile);
+        
+        let publicAvatarUrl = '';
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+          publicAvatarUrl = urlData.publicUrl;
+        }
+
+        // 3. Save User Data to Database
+        const { error: dbError } = await supabase.from('users').insert([{
+          id: user.id,
+          phone: cleanPhone,
+          name: name.trim(),
+          username: username.trim(),
+          avatar_url: publicAvatarUrl,
+          is_online: true,
+          last_seen: new Date().toISOString()
+        }]);
+
+        if (dbError) throw dbError;
+
+        // Success! Go to chat. Session is auto-saved.
+        navigate('/chat');
+
+      } else {
+        // --- LOG IN FLOW ---
+        const { error: loginError } = await supabase.auth.signInWithPassword({
+          email: dummyEmail,
+          password: password,
+        });
+
+        if (loginError) {
+          if (loginError.message.includes('Invalid login credentials')) {
+            throw new Error('Incorrect phone number or password.');
+          }
+          throw loginError;
+        }
+
+        // Success! Supabase auto-remembers the session.
+        navigate('/chat');
+      }
     } catch (err: any) {
-      setError(err.message || 'Invalid code. Please try again.');
+      setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  const toggleMode = () => {
+    setIsSignUp(!isSignUp);
+    setError('');
+    setPassword('');
+    setConfirmPassword('');
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white sm:bg-slate-100 p-0 sm:p-4 font-sans">
-      <div className="w-full h-full sm:h-auto max-w-sm sm:rounded-2xl bg-white sm:p-8 p-6 sm:shadow-xl flex flex-col justify-center sm:justify-start">
+    <div className="min-h-[100dvh] w-full flex items-center justify-center bg-[#f0f2f5] dark:bg-[#111b21] p-4 relative overflow-x-hidden">
+      
+      {/* EST Background Styling */}
+      <div className="absolute top-0 left-0 w-full h-[30vh] bg-[#c62828] dark:bg-[#1a0a0a] z-0"></div>
+      
+      <div className="w-full max-w-md bg-white dark:bg-[#202c33] rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.1)] z-10 overflow-hidden relative mt-10 md:mt-0">
         
-        {/* Header Section */}
-        <div className="mb-8 text-center pt-8 sm:pt-0">
-          <h1 className="text-2xl font-semibold text-[#111b21] mb-2 tracking-tight">
-            {mode === 'login' ? 'Log in to MedLine' : step === 'profile' ? 'Profile info' : step === 'credentials' ? 'Create Password' : 'Verify your number'}
-          </h1>
-          <p className="text-[15px] leading-relaxed text-[#54656f]">
-            {mode === 'login' && step === 'credentials' && "Enter your email and password to log in."}
-            {mode === 'signup' && step === 'phone' && "MedLine will send a verification code to your email later."}
-            {mode === 'signup' && step === 'profile' && "Please provide your name and an optional profile photo."}
-            {mode === 'signup' && step === 'credentials' && "Add an email and password for account security."}
-            {mode === 'signup' && step === 'otp' && `Waiting to automatically detect the 8-digit code sent to ${email}.`}
+        {/* Header */}
+        <div className="bg-gradient-to-r from-[#c62828] to-[#b71c1c] p-6 text-center">
+          <div className="w-20 h-20 mx-auto bg-white rounded-full p-1 shadow-lg mb-3">
+             <img src={APP_LOGO} alt="MedLine Logo" className="w-full h-full rounded-full object-cover scale-[1.2]" />
+          </div>
+          <h1 className="text-2xl font-extrabold text-white tracking-wide">MedLine Ultra</h1>
+          <p className="text-white/80 text-sm mt-1">{isSignUp ? 'Create your account' : 'Welcome back'}</p>
+        </div>
+
+        <form onSubmit={handleAuth} className="p-6 sm:p-8 space-y-4">
+          
+          {error && (
+            <div className="bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 p-3 rounded-lg text-sm font-medium text-center border border-red-200 dark:border-red-800">
+              {error}
+            </div>
+          )}
+
+          {isSignUp && (
+            <div className="flex flex-col items-center mb-6">
+              <div 
+                className="relative w-24 h-24 rounded-full bg-[#f0f2f5] dark:bg-[#111b21] border-2 border-dashed border-[#c62828] flex items-center justify-center cursor-pointer group overflow-hidden"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {avatarPreview ? (
+                  <img src={avatarPreview} alt="Preview" className="w-full h-full object-cover" />
+                ) : (
+                  <Camera className="w-8 h-8 text-[#c62828] opacity-50 group-hover:opacity-100 transition-opacity" />
+                )}
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-white text-xs font-bold uppercase">Upload</span>
+                </div>
+              </div>
+              <input type="file" ref={fileInputRef} onChange={handleAvatarChange} accept="image/*" className="hidden" />
+              <p className="text-xs text-[#8696a0] mt-2 font-medium">Profile Picture (Required)</p>
+            </div>
+          )}
+
+          {isSignUp && (
+            <div className="flex space-x-3">
+              <div className="flex-1 relative">
+                <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#8696a0]" />
+                <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Full Name" className="pl-10 bg-[#f0f2f5] dark:bg-[#111b21] border-none h-12 rounded-xl focus-visible:ring-[#c62828]" />
+              </div>
+              <div className="flex-1 relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8696a0] font-bold">@</span>
+                <Input required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" className="pl-8 bg-[#f0f2f5] dark:bg-[#111b21] border-none h-12 rounded-xl focus-visible:ring-[#c62828]" />
+              </div>
+            </div>
+          )}
+
+          <div className="relative">
+            <PhoneInput
+              international
+              defaultCountry="AE"
+              value={phone}
+              onChange={setPhone}
+              className="flex w-full bg-[#f0f2f5] dark:bg-[#111b21] border-none h-12 rounded-xl px-4 focus-within:ring-2 focus-within:ring-[#c62828] text-[#111b21] dark:text-white [&>input]:bg-transparent [&>input]:border-none [&>input]:outline-none"
+              placeholder="Phone Number"
+            />
+          </div>
+
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#8696a0]" />
+            <Input required type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="pl-10 pr-10 bg-[#f0f2f5] dark:bg-[#111b21] border-none h-12 rounded-xl focus-visible:ring-[#c62828]" />
+            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8696a0] hover:text-[#c62828]">
+              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+            </button>
+          </div>
+
+          {isSignUp && (
+            <div className="relative animate-in slide-in-from-top-2">
+              <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-[#8696a0]" />
+              <Input required type={showPassword ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Confirm Password" className="pl-10 pr-10 bg-[#f0f2f5] dark:bg-[#111b21] border-none h-12 rounded-xl focus-visible:ring-[#c62828]" />
+            </div>
+          )}
+
+          <div className="pt-2">
+            <Button type="submit" disabled={loading} className="w-full h-12 rounded-xl bg-[#fbc02d] hover:bg-[#f9a825] text-[#1a0a0a] font-extrabold text-lg shadow-md transition-all">
+              {loading ? 'Processing...' : (isSignUp ? 'Create Account' : 'Log In')}
+            </Button>
+          </div>
+          
+        </form>
+
+        <div className="bg-[#f5f6f6] dark:bg-[#182229] p-4 text-center border-t border-[#e9edef] dark:border-[#222d34]">
+          <p className="text-[14px] text-[#667781] dark:text-[#8696a0]">
+            {isSignUp ? "Already have an account? " : "Don't have an account? "}
+            <span onClick={toggleMode} className="text-[#c62828] dark:text-[#fbc02d] font-bold cursor-pointer hover:underline">
+              {isSignUp ? 'Log in here' : 'Sign up now'}
+            </span>
           </p>
         </div>
 
-        {error && (
-          <div className="mb-6 rounded-lg bg-red-50 p-4 text-sm text-red-600 text-center border border-red-100">
-            {error}
-          </div>
-        )}
-
-        <div className="flex-1 flex flex-col">
-          {/* --- STEP 1: PHONE (Signup Only) --- */}
-          {step === 'phone' && mode === 'signup' && (
-            <form onSubmit={submitPhone} className="flex flex-col h-full">
-              <div className="space-y-1 mb-auto">
-                <div className="flex w-full border-b-2 border-[#00a884] focus-within:border-[#00a884] transition-colors py-2">
-                   <PhoneInput
-                    international
-                    defaultCountry="AE"
-                    placeholder="phone number"
-                    value={phone}
-                    onChange={setPhone}
-                    className="w-full text-lg outline-none bg-transparent"
-                    inputComponent={Input}
-                    style={{ border: 'none', boxShadow: 'none', paddingLeft: '8px' }}
-                  />
-                </div>
-              </div>
-              
-              <div className="mt-12 flex flex-col items-center gap-6">
-                <Button type="submit" className="w-[120px] rounded-full bg-[#00a884] hover:bg-[#058b6e] text-white font-medium py-6 text-base shadow-sm">
-                  Next
-                </Button>
-                <button type="button" onClick={switchToLogin} className="text-[15px] text-[#00a884] hover:underline font-medium">
-                  Already have an account? Log in
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* --- STEP 2: PROFILE (Signup Only) --- */}
-          {step === 'profile' && mode === 'signup' && (
-            <form onSubmit={submitProfile} className="flex flex-col h-full">
-              <div className="flex flex-col items-center space-y-6 mb-auto">
-                <div className="relative h-32 w-32 overflow-hidden rounded-full bg-[#f0f2f5] flex items-center justify-center group cursor-pointer transition-all hover:bg-[#e9edef]">
-                  {avatarPreview ? (
-                    <img src={avatarPreview} alt="Avatar" className="h-full w-full object-cover" />
-                  ) : (
-                    <User size={48} className="text-[#aebac1]" />
-                  )}
-                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                     <span className="text-sm font-medium text-white uppercase tracking-wider">Add Photo</span>
-                  </div>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleAvatarSelect}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
-                </div>
-
-                <div className="w-full">
-                  <Input
-                    id="name"
-                    type="text"
-                    placeholder="Type your name here"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    className="w-full border-0 border-b-2 border-[#00a884] rounded-none px-0 py-2 text-lg focus-visible:ring-0 shadow-none bg-transparent"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-12 flex items-center justify-between w-full">
-                  <Button type="button" variant="ghost" size="icon" onClick={() => goBack('phone')} className="text-[#54656f] hover:bg-[#f0f2f5] rounded-full">
-                      <ArrowLeft className="h-6 w-6" />
-                  </Button>
-                  <Button type="submit" className="w-[120px] rounded-full bg-[#00a884] hover:bg-[#058b6e] text-white font-medium py-6 text-base shadow-sm">
-                      Next
-                  </Button>
-              </div>
-            </form>
-          )}
-
-          {/* --- STEP 3: CREDENTIALS (Email & Password - Both Modes) --- */}
-          {step === 'credentials' && (
-            <form onSubmit={mode === 'signup' ? submitSignupCredentials : submitLogin} className="flex flex-col h-full">
-              <div className="space-y-6 mb-auto">
-                <div className="relative flex items-center border-b-2 border-[#00a884] py-2">
-                  <Mail className="h-5 w-5 text-[#8696a0] mr-3" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="Email address"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="border-0 p-0 text-lg shadow-none focus-visible:ring-0 rounded-none bg-transparent w-full"
-                    required
-                  />
-                </div>
-                
-                <div className="relative flex items-center border-b-2 border-[#00a884] py-2">
-                  <Lock className="h-5 w-5 text-[#8696a0] mr-3" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="Password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="border-0 p-0 text-lg shadow-none focus-visible:ring-0 rounded-none bg-transparent w-full"
-                    required
-                  />
-                </div>
-              </div>
-              
-              <div className="mt-12 flex flex-col items-center gap-6">
-                 <div className="flex items-center justify-between w-full">
-                    {mode === 'signup' ? (
-                      <Button type="button" variant="ghost" size="icon" disabled={loading} onClick={() => goBack('profile')} className="text-[#54656f] hover:bg-[#f0f2f5] rounded-full">
-                          <ArrowLeft className="h-6 w-6" />
-                      </Button>
-                    ) : (
-                      <div className="w-10"></div>
-                    )}
-                    <Button type="submit" className="px-8 rounded-full bg-[#00a884] hover:bg-[#058b6e] text-white font-medium py-6 text-base shadow-sm" disabled={loading}>
-                        {loading ? 'Wait...' : mode === 'login' ? 'Log In' : 'Sign Up'}
-                    </Button>
-                </div>
-                {mode === 'login' && (
-                  <button type="button" onClick={switchToSignup} className="text-[15px] text-[#00a884] hover:underline font-medium">
-                    Need an account? Sign up
-                  </button>
-                )}
-              </div>
-            </form>
-          )}
-
-          {/* --- STEP 4: FINAL Verification (Sign Up OTP ONLY) --- */}
-          {step === 'otp' && mode === 'signup' && (
-            <form onSubmit={verifySignupOtp} className="flex flex-col h-full">
-              <div className="flex flex-col items-center mb-auto space-y-6">
-                <Input
-                  id="emailOtp"
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={8}
-                  placeholder="— — — — — — — —"
-                  value={emailOtp}
-                  onChange={(e) => setEmailOtp(e.target.value)}
-                  required
-                  className="w-full text-center text-3xl font-medium tracking-[0.2em] border-0 border-b-2 border-[#00a884] rounded-none px-0 py-4 shadow-none focus-visible:ring-0 bg-transparent text-[#111b21]"
-                />
-                <p className="text-[14px] text-[#54656f] text-center">
-                    Enter 8-digit code
-                </p>
-              </div>
-              
-              <div className="mt-12 flex flex-col items-center gap-6">
-                <div className="flex items-center justify-between w-full">
-                    <Button type="button" variant="ghost" size="icon" disabled={loading} onClick={() => goBack('credentials')} className="text-[#54656f] hover:bg-[#f0f2f5] rounded-full">
-                        <ArrowLeft className="h-6 w-6" />
-                    </Button>
-                    <Button type="submit" className="px-8 rounded-full bg-[#00a884] hover:bg-[#058b6e] text-white font-medium py-6 text-base shadow-sm" disabled={loading}>
-                        {loading ? 'Verifying...' : 'Done'}
-                    </Button>
-                </div>
-              </div>
-            </form>
-          )}
-        </div>
       </div>
     </div>
   );
