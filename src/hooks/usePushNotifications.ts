@@ -3,9 +3,11 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/src/lib/supabase';
 import { useAuth } from '@/src/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export function usePushNotifications() {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     // Only ask for permissions on a real phone, not the web browser
@@ -49,6 +51,14 @@ export function usePushNotifications() {
     // 5. Listen for incoming notifications while the app is OPEN
     PushNotifications.addListener('pushNotificationReceived', (notification) => {
       console.log('Push received: ', notification);
+    });
+
+    // 6. NEW: Listen for when the user TAPS the notification from the background
+    PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+      console.log('User tapped the notification: ', notification);
+      
+      // Navigate the user directly to the chat when they tap the notification
+      navigate('/chat');
     });
   };
 }
