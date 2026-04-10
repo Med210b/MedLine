@@ -2,13 +2,18 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { supabase } from '@/src/lib/supabase';
 import { useAuth } from '@/src/contexts/AuthContext';
 
-// Google's Public STUN servers to bypass Wi-Fi and Firewalls
+// Upgraded STUN and TURN Servers for Global Calling
 const ICE_SERVERS = {
   iceServers: [
+    // Google's Public STUN servers for local connections
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
+    // Your Custom TURN Server for global/firewalled connections
+    {
+      urls: 'turn:free.expressturn.com:3478',
+      username: '000000002091200911',
+      credential: 'dZiUriau2n62H8PENNcNp3g4ir0='
+    }
   ]
 };
 
