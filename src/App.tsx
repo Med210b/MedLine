@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/src/contexts/AuthContext';
 import { CallProvider } from '@/src/contexts/CallContext';
@@ -10,6 +10,7 @@ import Chat from '@/src/pages/Chat';
 import Settings from '@/src/pages/Settings';
 import { useNotifications } from '@/src/hooks/useNotifications';
 import { usePushNotifications } from '@/src/hooks/usePushNotifications';
+import { IncomingCallKit } from '@capgo/capacitor-incoming-call-kit';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://vydtnkweietlfvjhbdhv.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5ZHRua3dlaWV0bGZ2amhiZGh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MjY4ODIsImV4cCI6MjA4OTUwMjg4Mn0.hJII6DG0BmFgc8i7cE5BLwFheHGSYRb7WrOSbLIz9Zc';
@@ -20,7 +21,42 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// FIX: Separated the Routes into their own component so the Router exists FIRST
+// 1. Native Call UI Manager
+function NativeCallManager() {
+  useEffect(() => {
+    const setupNativeCalls = async () => {
+      try {
+        // Request necessary permissions (Android 13+ Notifications)
+        await IncomingCallKit.requestPermissions();
+        // Request permission to show full-screen popups over the lock screen (Android 14+)
+        await IncomingCallKit.requestFullScreenIntentPermission();
+
+        console.log("IncomingCallKit successfully initialized!");
+
+        // Listen for when the user clicks "Answer" on the native screen
+        IncomingCallKit.addListener('callAccepted', (call) => {
+          console.log("User answered native call:", call);
+          // TODO: Route user to the call screen
+        });
+
+        // Listen for when the user clicks "Decline"
+        IncomingCallKit.addListener('callDeclined', (call) => {
+          console.log("User rejected native call:", call);
+          // TODO: Tell Supabase the call was rejected
+        });
+
+      } catch (error) {
+        console.error("Native CallKit setup failed:", error);
+      }
+    };
+
+    setupNativeCalls();
+  }, []);
+
+  return null;
+}
+
+// 2. Separated the Routes into their own component so the Router exists FIRST
 function AppRoutes() {
   // Now these hooks run safely INSIDE the Router context!
   useNotifications();
@@ -58,14 +94,17 @@ function AppRoutes() {
   );
 }
 
+// 3. Main Content Wrapper
 function AppContent() {
   return (
     <Router>
+      <NativeCallManager />
       <AppRoutes />
     </Router>
   );
 }
 
+// 4. Root App Component
 export default function App() {
   if (!supabaseUrl || !supabaseAnonKey) {
     return (

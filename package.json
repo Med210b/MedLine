@@ -16,6 +16,7 @@
     "@capacitor/android": "^8.2.0",
     "@capacitor/core": "^8.2.0",
     "@capacitor/push-notifications": "^8.0.2",
+    "@capgo/capacitor-incoming-call-kit": "^8.1.1",
     "@supabase/supabase-js": "^2.99.3",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",

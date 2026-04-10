@@ -4,60 +4,50 @@ import { Capacitor } from '@capacitor/core';
 import { supabase } from '@/src/lib/supabase';
 import { useAuth } from '@/src/contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { IncomingCallKit } from '@capgo/capacitor-incoming-call-kit';
 
 export function usePushNotifications() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Only ask for permissions on a real phone, not the web browser
     if (Capacitor.getPlatform() !== 'web' && user) {
       registerPush();
     }
   }, [user]);
 
   const registerPush = async () => {
-    // 1. Request permission from the user
     let permStatus = await PushNotifications.checkPermissions();
     if (permStatus.receive === 'prompt') {
       permStatus = await PushNotifications.requestPermissions();
     }
 
     if (permStatus.receive !== 'granted') {
-      console.log('User denied push notifications');
       return;
     }
 
-    // 2. Register with Google Firebase
     await PushNotifications.register();
 
-    // 3. Get the unique device token and save it to Supabase
     PushNotifications.addListener('registration', async (token) => {
-      console.log('Push registration success, token: ' + token.value);
-      
-      const { error } = await supabase
+      await supabase
         .from('users')
         .update({ fcm_token: token.value })
         .eq('id', user?.id);
-        
-      if (error) console.error("Error saving FCM token:", error);
     });
 
-    // 4. Listen for errors
-    PushNotifications.addListener('registrationError', (error: any) => {
-      console.error('Error on registration: ' + JSON.stringify(error));
-    });
-
-    // 5. Listen for incoming notifications while the app is OPEN
     PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('Push received: ', notification);
+      // Logic to trigger the native ringing screen
+      if (notification.title?.includes('Call')) {
+        IncomingCallKit.showIncomingCall({
+          callId: Math.random().toString(), // The unique ID for the call
+          callerName: notification.body || "Medline Caller", // FIX: Added 'callerName' (Required)
+          handle: "Incoming Video Call", // Subtitle or number
+          hasVideo: true,
+        }).catch(err => console.error("Native CallKit error:", err));
+      }
     });
 
-    // 6. NEW: Listen for when the user TAPS the notification from the background
     PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
-      console.log('User tapped the notification: ', notification);
-      
-      // Navigate the user directly to the chat when they tap the notification
       navigate('/chat');
     });
   };
