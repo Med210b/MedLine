@@ -9,6 +9,7 @@ import ProfileSetup from '@/src/pages/ProfileSetup';
 import Chat from '@/src/pages/Chat';
 import Settings from '@/src/pages/Settings';
 import { useNotifications } from '@/src/hooks/useNotifications';
+import { usePushNotifications } from '@/src/hooks/usePushNotifications'; // <-- ADDED THIS
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://vydtnkweietlfvjhbdhv.supabase.co';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5ZHRua3dlaWV0bGZ2amhiZGh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5MjY4ODIsImV4cCI6MjA4OTUwMjg4Mn0.hJII6DG0BmFgc8i7cE5BLwFheHGSYRb7WrOSbLIz9Zc';
@@ -21,6 +22,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function AppContent() {
   useNotifications();
+  usePushNotifications(); // <-- ADDED THIS to activate Capacitor push notifications
+
   return (
     <Router>
       <Routes>

@@ -30,6 +30,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const unprocessedStreamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const internalVideoRef = useRef<HTMLVideoElement | null>(null);
+  
+  // FIX: Added a queue to hold ICE candidates that arrive before the call is answered
+  const remoteIceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
 
   const FILTER_OPTIONS = [
     'none',
@@ -50,22 +53,31 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       config: { broadcast: { ack: false } }
     });
 
-    channel.on('broadcast', { event: 'call-signal' }, async ({ payload }) => {
+    channel.on('broadcast', { event: 'call-signal' }, async ({ payload }: { payload: any }) => {
       if (payload.targetId !== user.id) return;
 
       if (payload.type === 'offer') {
+        remoteIceCandidatesQueue.current = []; // Reset queue for new call
         setIncomingCall({ callerId: payload.senderId, offer: payload.data.offer, isVideo: payload.data.video });
       }
 
       if (payload.type === 'answer' && pcRef.current) {
         await pcRef.current.setRemoteDescription(new RTCSessionDescription(payload.data));
+        // Flush queue: add candidates that arrived while waiting for answer
+        for (const candidate of remoteIceCandidatesQueue.current) {
+            try { await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e: any){}
+        }
+        remoteIceCandidatesQueue.current = [];
       }
 
-      if (payload.type === 'ice-candidate' && pcRef.current) {
-        try {
-          await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.data));
-        } catch (e) {
-          console.error("Error adding received ice candidate", e);
+      if (payload.type === 'ice-candidate') {
+        // If connection is ready, add it immediately. Otherwise, queue it!
+        if (pcRef.current && pcRef.current.remoteDescription) {
+          try {
+            await pcRef.current.addIceCandidate(new RTCIceCandidate(payload.data));
+          } catch (e: any) { console.error("Error adding received ice candidate", e); }
+        } else {
+          remoteIceCandidatesQueue.current.push(payload.data);
         }
       }
 
@@ -81,7 +93,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user]);
 
-  // VIDEO FRAME PROCESSING LOOP (FIXED: Element must not be display: none)
+  // VIDEO FRAME PROCESSING LOOP
   useEffect(() => {
     const internalVideo = internalVideoRef.current;
     const canvas = canvasRef.current;
@@ -156,6 +168,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIsCaller(false);
     setIsVideo(false);
     setFilterIndex(0);
+    remoteIceCandidatesQueue.current = [];
   };
 
   const initiateCall = async (targetId: string, video: boolean) => {
@@ -171,21 +184,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       pcRef.current = pc;
       setCurrentCall({ targetId, peerConnection: pc });
 
-      let streamToSend;
+      let streamToSend = rawStream;
       
       if (video && canvasRef.current) {
-        // Create canvas capture stream with applied filters
-        const canvasStream = (canvasRef.current as any).captureStream(30);
-        const audioTrack = rawStream.getAudioTracks()[0];
-        if (audioTrack) canvasStream.addTrack(audioTrack);
-        streamToSend = canvasStream;
-      } else {
-        streamToSend = rawStream;
+        try {
+          const canvasStream = (canvasRef.current as any).captureStream(30);
+          const audioTrack = rawStream.getAudioTracks()[0];
+          if (audioTrack) canvasStream.addTrack(audioTrack);
+          streamToSend = canvasStream;
+        } catch (e) {
+          console.warn("Canvas capture stream failed on this device, using raw camera stream", e);
+          streamToSend = rawStream;
+        }
       }
 
       setLocalStream(streamToSend);
       
-      streamToSend.getTracks().forEach(track => pc.addTrack(track, streamToSend));
+      streamToSend.getTracks().forEach((track: MediaStreamTrack) => pc.addTrack(track, streamToSend));
 
       pc.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
@@ -205,7 +220,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     } catch (err) {
       console.error("Failed to access Camera/Microphone:", err);
-      alert("Call failed: Please ensure you have granted Camera and Microphone permissions in your browser.");
+      alert("Call failed: Please ensure you have granted Camera and Microphone permissions.");
       cleanupCall();
     }
   };
@@ -223,20 +238,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       pcRef.current = pc;
       setCurrentCall({ targetId: incomingCall.callerId, peerConnection: pc });
 
-      let streamToSend;
+      let streamToSend = rawStream;
       
       if (incomingCall.isVideo && canvasRef.current) {
-        const canvasStream = (canvasRef.current as any).captureStream(30);
-        const audioTrack = rawStream.getAudioTracks()[0];
-        if (audioTrack) canvasStream.addTrack(audioTrack);
-        streamToSend = canvasStream;
-      } else {
-        streamToSend = rawStream;
+        try {
+          const canvasStream = (canvasRef.current as any).captureStream(30);
+          const audioTrack = rawStream.getAudioTracks()[0];
+          if (audioTrack) canvasStream.addTrack(audioTrack);
+          streamToSend = canvasStream;
+        } catch (e) {
+          console.warn("Canvas capture stream failed, using raw stream", e);
+          streamToSend = rawStream;
+        }
       }
 
       setLocalStream(streamToSend);
       
-      streamToSend.getTracks().forEach(track => pc.addTrack(track, streamToSend));
+      streamToSend.getTracks().forEach((track: MediaStreamTrack) => pc.addTrack(track, streamToSend));
 
       pc.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
@@ -249,6 +267,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       };
 
       await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+      
+      // FIX: Flush queue after setting remote description!
+      for (const candidate of remoteIceCandidatesQueue.current) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e: any){}
+      }
+      remoteIceCandidatesQueue.current = [];
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       sendSignal(incomingCall.callerId, 'answer', answer);
@@ -295,7 +320,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   };
 
   const cycleFilter = () => {
-    setFilterIndex((prev) => (prev + 1) % FILTER_OPTIONS.length);
+    setFilterIndex((prev: number) => (prev + 1) % FILTER_OPTIONS.length);
   };
 
   return (
@@ -304,7 +329,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       localStream, remoteStream, isVideo, isCaller, cycleFilter, filterIndex, FILTER_OPTIONS
     }}>
       {children}
-      {/* FIX: Elements must NOT be display: none for requestAnimationFrame to work in browsers */}
       <canvas ref={canvasRef} className="absolute opacity-0 pointer-events-none w-2 h-2 -z-50" />
       <video ref={internalVideoRef} muted playsInline className="absolute opacity-0 pointer-events-none w-2 h-2 -z-50" />
     </CallContext.Provider>
